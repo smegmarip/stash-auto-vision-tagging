@@ -1,0 +1,54 @@
+# ----------------------------------------------------------------------------
+# Editor / IDE state
+# ----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ----------------------------------------------------------------------------
+# OS clutter
+# ----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ----------------------------------------------------------------------------
+# Assistant / tooling state
+# ----------------------------------------------------------------------------
+.claude/
+.history/
+CLAUDE.local.md
+.aider*
+.cursor/
+
+# ----------------------------------------------------------------------------
+# Go build artifacts
+#
+# NOTE: the shipped plugin binary `gorpc/stash-auto-vision-tagging-rpc` is
+# tracked deliberately — Stash loads it directly and users are not expected
+# to build from source unless they're cross-compiling. The patterns below
+# cover incidental build output only; they do not match the committed
+# binary because it has no `.exe` / `.test` / `.out` suffix.
+# ----------------------------------------------------------------------------
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+gorpc/vendor/
+
+# ----------------------------------------------------------------------------
+# Logs / scratch
+# ----------------------------------------------------------------------------
+*.log
+*.tmp
+tmp/
+scratch/
