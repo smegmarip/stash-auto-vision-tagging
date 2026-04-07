@@ -1,0 +1,144 @@
+name: Auto Vision Tagging
+description: Submit scenes to the stash-auto-vision semantics service and apply the resulting tags
+version: 0.1.0
+url: https://github.com/stashapp/CommunityScripts
+
+ui:
+  requires:
+    - CommunityScriptsUILibrary
+  javascript:
+    - https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js
+    - js/stashFunctions.js
+    - js/auto-vision-tagging.js
+
+exec:
+  - gorpc/stash-auto-vision-tagging-rpc
+interface: rpc
+
+tasks:
+  - name: Tag Scene
+    description: Run auto-vision classification on a single scene
+    defaultArgs:
+      mode: tag
+  - name: Batch Tag Scenes
+    description: Run auto-vision classification on every eligible scene, one at a time
+    defaultArgs:
+      mode: tagBatch
+
+hooks:
+  - name: Auto-tag on scan
+    description: Queue a Tag Scene task for newly created scenes (gated by autoTagOnCreate setting)
+    triggeredBy:
+      - Scene.Create.Post
+    defaultArgs:
+      mode: tagOnCreate
+
+settings:
+  # --- API hosts (no defaults; user must configure full scheme://host:port) ---
+  #
+  # The plugin understands two independent hosts, each with its own request
+  # format and its own response envelope. Both hosts share the same job store,
+  # so a job submitted to one can also be looked up via the other, but the
+  # payload shapes differ and the plugin picks one as primary.
+  rollupApiUrl:
+    displayName: Vision Roll-up API Host
+    description: "Base URL of the vision-api orchestrator (must include scheme and explicit port, e.g. http://host:5010). Serves POST /vision/analyze and GET /vision/jobs/{id}/status|results with the roll-up request/response envelope. Required."
+    type: STRING
+  semanticsApiUrl:
+    displayName: Semantics Service API Host
+    description: "Base URL of the semantics-service (must include scheme and explicit port, e.g. http://host:5004). Serves POST /semantics/analyze and GET /semantics/jobs/{id}/status|results with the flat semantics request/response envelope. Required."
+    type: STRING
+  useSemanticsApiAsPrimary:
+    displayName: Use Semantics API as Primary
+    description: "OFF (default) → the Vision Roll-up host is the primary target and the Semantics Service host is the automatic fallback. ON → the Semantics Service host becomes primary and the roll-up is the fallback."
+    type: BOOLEAN
+  pollIntervalSeconds:
+    displayName: Poll Interval (seconds)
+    description: "Polling cadence for job status. Default: 2"
+    type: NUMBER
+  jobTimeoutSeconds:
+    displayName: Job Timeout (seconds)
+    description: "Hard ceiling on a single job before giving up. Default: 1800"
+    type: NUMBER
+
+  # --- Default classification parameters (overrides per-scene values that do not change with the scene) ---
+  useVisionModel:
+    displayName: Use Vision Model
+    description: "OFF (default) → the plugin omits model_variant so the service uses its own default (text-only). ON → the plugin explicitly sends model_variant=vision."
+    type: BOOLEAN
+  minConfidence:
+    displayName: Minimum Confidence
+    description: "Classifier confidence threshold as a decimal string, 0.0–1.0 (e.g. 0.75). Leave blank to use the service default (0.75)."
+    type: STRING
+  topKTags:
+    displayName: Top K Tags
+    description: "Maximum tags returned per scene (1–100). Leave blank to use the service default (30)."
+    type: NUMBER
+  disableHierarchicalDecoding:
+    displayName: Disable Hierarchical Decoding
+    description: "Opt-out flag. OFF (default) = let the service apply its taxonomy-consistent post-processing. ON = explicitly disable it."
+    type: BOOLEAN
+  useSceneBasedFrameSelection:
+    displayName: Use Scene-based Frame Selection
+    description: "OFF (default) → the plugin omits frame_selection so the service uses its own default (sprite_sheet). ON → the plugin explicitly sends frame_selection=scene_based. Interval-based selection is not supported by this plugin."
+    type: BOOLEAN
+  framesPerScene:
+    displayName: Frames Per Scene
+    description: "1–32. Leave blank to use the service default (16)."
+    type: NUMBER
+  disableSharpestFrameSelection:
+    displayName: Disable Sharpest Frame Selection
+    description: "Opt-out flag. OFF (default) = let the service pick the sharpest frames. ON = explicitly disable the sharpness filter."
+    type: BOOLEAN
+  sharpnessCandidateMultiplier:
+    displayName: Sharpness Candidate Multiplier
+    description: "Candidates per frames_per_scene (1–10). Leave blank to use the service default (3)."
+    type: NUMBER
+  minFrameQuality:
+    displayName: Minimum Frame Quality
+    description: "Decimal string, 0.0–1.0 (e.g. 0.05). Filters black/blank frames. Leave blank to use the service default."
+    type: STRING
+  disableQuantization:
+    displayName: Disable 4-bit Quantization
+    description: "Opt-out flag. OFF (default) = let the service use 4-bit quantization. ON = explicitly disable it (much higher VRAM use)."
+    type: BOOLEAN
+  generateEmbeddings:
+    displayName: Generate Embeddings
+    description: "Opt-in flag. OFF (default) matches the service default. The plugin ignores the embedding payload either way."
+    type: BOOLEAN
+
+  # --- Tag application policy ---
+  autoTaggedTagId:
+    displayName: Auto-tagged Tag ID
+    description: "Optional for single-scene mode; REQUIRED for batch mode. When set, this tag is added to every scene the plugin processes and is also used as the marker for 'already classified' in batch and hook modes."
+    type: STRING
+  excludedTagIds:
+    displayName: Excluded Tag IDs
+    description: "Comma-separated Stash tag IDs to drop from results (selective)."
+    type: STRING
+  excludedTagIdsRecursive:
+    displayName: Recursively Excluded Tag IDs
+    description: "Comma-separated Stash tag IDs whose entire descendant subtree should be dropped from results."
+    type: STRING
+  replaceExistingTags:
+    displayName: Replace Existing Tags
+    description: "OFF (default) → merge: new tags are unioned with the scene's existing tags. ON → replace: the scene's existing tags are DISCARDED before applying new ones. WARNING: the replace path is destructive and cannot be undone."
+    type: BOOLEAN
+
+  # --- Batch / hook ---
+  batchTagId:
+    displayName: Batch Input Tag ID
+    description: "Optional. If set, batch mode only processes scenes carrying this tag (descendants included)."
+    type: STRING
+  maxBatchSize:
+    displayName: Max Batch Size
+    description: "Hard cap on scenes queued per batch run. Default: 50"
+    type: NUMBER
+  cooldownSeconds:
+    displayName: Cooldown Between Scenes (seconds)
+    description: "Sleep held on the worker queue slot at the end of each batch-queued Tag Scene task so the next batch scene doesn't immediately start on the GPU. Only applies to scenes queued via Batch Tag Scenes; single-scene and hook invocations are unaffected. Default: 5"
+    type: NUMBER
+  autoTagOnCreate:
+    displayName: Auto-tag New Scenes
+    description: "If true, the Scene.Create.Post hook will queue a Tag Scene task for every newly created scene. Default: false"
+    type: BOOLEAN
