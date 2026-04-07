@@ -949,14 +949,34 @@ func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierT
 	var finalIDs []string
 	switch effectivePolicy {
 	case "replace":
+		// Replace wipes the scene's existing tags unconditionally, so the
+		// exclusion set only needs to be consulted on the classifier side
+		// (already done above when building keptIDs).
 		finalIDs = append(finalIDs, keptIDs...)
 		if autoTaggedTagID != "" && !containsString(finalIDs, autoTaggedTagID) {
 			finalIDs = append(finalIDs, autoTaggedTagID)
 		}
 	default: // merge
+		// Filter the scene's pre-existing tags through the exclusion set
+		// too. Otherwise an excluded tag that was already on the scene —
+		// from a prior plugin run, a manual add, or an earlier version
+		// with different exclusion settings — would ride through the
+		// merge untouched. The exclusion lists are meant to express "this
+		// tag should never appear on the scene", not just "don't add this
+		// tag from the classifier this one time".
 		existing := make([]string, 0, len(scene.Tags))
+		existingRemoved := 0
 		for _, t := range scene.Tags {
-			existing = append(existing, string(t.ID))
+			id := string(t.ID)
+			if excluded[id] {
+				existingRemoved++
+				continue
+			}
+			existing = append(existing, id)
+		}
+		if existingRemoved > 0 {
+			log.Infof("Exclusion: removed %d pre-existing tag(s) from scene %s that matched the exclusion set",
+				existingRemoved, string(scene.ID))
 		}
 		finalIDs = mergeTagIDs(existing, keptIDs)
 		if autoTaggedTagID != "" && !containsString(finalIDs, autoTaggedTagID) {
@@ -976,6 +996,9 @@ func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierT
 // entries are each walked via findTags(parents, depth=-1) and their entire
 // descendant subtree is added. Results are cached per-task in
 // a.descendantCache.
+//
+// Both lists are unioned together into a single exclusion set — they are
+// additive, not alternatives.
 func (a *autoVisionPlugin) buildExclusionSet() (map[string]bool, error) {
 	excluded := map[string]bool{}
 
@@ -985,17 +1008,23 @@ func (a *autoVisionPlugin) buildExclusionSet() (map[string]bool, error) {
 	}
 
 	recursive := splitCSV(getStringSetting(a.config, "excludedTagIdsRecursive", ""))
+
+	log.Infof("Exclusion: flat=[%s] recursive=[%s]",
+		strings.Join(flat, ","), strings.Join(recursive, ","))
+
 	for _, parentID := range recursive {
 		excluded[parentID] = true
 		descendants, err := a.getDescendantsCached(parentID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve descendants of %s: %w", parentID, err)
 		}
+		log.Infof("Exclusion: parent %s → %d descendants", parentID, len(descendants))
 		for id := range descendants {
 			excluded[id] = true
 		}
 	}
 
+	log.Infof("Exclusion: total excluded tag IDs=%d", len(excluded))
 	return excluded, nil
 }
 
@@ -1160,11 +1189,18 @@ func (a *autoVisionPlugin) findBatchScenes(batchTagID, autoTaggedTagID string) (
 // GraphQL: findTags (for recursive descendant resolution)
 // -----------------------------------------------------------------------------
 
+// tagIDOnly is the minimal tag projection for recursive descendant lookups.
+// It is a named type (rather than an inline anonymous struct) because
+// hasura/go-graphql-client's reflection on anonymous element types inside
+// slices is unreliable — the working batch query (batchScene / sceneFile)
+// uses named element types for the same reason.
+type tagIDOnly struct {
+	ID graphql.ID `graphql:"id"`
+}
+
 type findTagsResult struct {
-	Count graphql.Int
-	Tags  []struct {
-		ID graphql.ID `graphql:"id"`
-	} `graphql:"tags"`
+	Count graphql.Int `graphql:"count"`
+	Tags  []tagIDOnly `graphql:"tags"`
 }
 
 type TagFilterType struct {
@@ -1173,6 +1209,19 @@ type TagFilterType struct {
 
 // findDescendantTags returns every tag whose ancestry chain contains parentID.
 // Uses depth=-1 so the whole subtree is pulled in one query.
+//
+// Notes on the variable shape — confirmed working against a live Stash
+// instance via the GraphQL playground:
+//
+//   - per_page: -1 (unlimited) matches the playground behavior; a hardcoded
+//     5000 cap silently loses tags on very large trees.
+//   - modifier: INCLUDES_ALL, NOT INCLUDES. With depth=-1 the
+//     hierarchicalCriterionHandler builds a recursive CTE and LEFT JOINs
+//     it; the plain INCLUDES branch does not add the HAVING clause that
+//     interacts correctly with the implicit grouping, and returns nothing
+//     in practice. INCLUDES_ALL produces the correct behavior for a
+//     single-value filter because len(Value)==1 makes the HAVING
+//     trivially true.
 func (a *autoVisionPlugin) findDescendantTags(parentID string) (map[string]bool, error) {
 	ctx := context.Background()
 
@@ -1180,14 +1229,14 @@ func (a *autoVisionPlugin) findDescendantTags(parentID string) (map[string]bool,
 		FindTags findTagsResult `graphql:"findTags(filter: $f, tag_filter: $tf)"`
 	}
 
-	perPage := graphql.Int(5000)
+	perPage := graphql.Int(-1)
 	filter := &FindFilterType{PerPage: &perPage}
 
 	depth := graphql.Int(-1)
 	tf := &TagFilterType{
 		Parents: &HierarchicalMultiCriterionInput{
 			Value:    []graphql.String{graphql.String(parentID)},
-			Modifier: "INCLUDES",
+			Modifier: "INCLUDES_ALL",
 			Depth:    &depth,
 		},
 	}
