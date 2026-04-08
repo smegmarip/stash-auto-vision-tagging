@@ -128,6 +128,10 @@ settings:
     displayName: Merge Summary When Details Empty
     description: "OFF (default) → the plugin never touches the scene's details field. ON → when the scene's details field is empty AND the classifier returned a non-empty scene_summary, the plugin writes that summary into details as part of the same sceneUpdate that writes tags. Scenes that already have any details content are left untouched."
     type: BOOLEAN
+  mergeTitleWhenMissing:
+    displayName: Merge Title When Scene Title Empty
+    description: "OFF (default) → the plugin never touches the scene's title field. ON → when the scene's title field is empty AND the classifier returned a non-empty suggested_title, the plugin writes that title into the scene as part of the same sceneUpdate that writes tags. Scenes that already have any title content are left untouched."
+    type: BOOLEAN
 
   # --- Batch / hook ---
   batchTagId:

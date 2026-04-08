@@ -211,8 +211,9 @@ type ClassifierTag struct {
 }
 
 type SemanticsOutcome struct {
-	Tags         []ClassifierTag `json:"tags"`
-	SceneSummary string          `json:"scene_summary,omitempty"`
+	Tags           []ClassifierTag `json:"tags"`
+	SceneSummary   string          `json:"scene_summary,omitempty"`
+	SuggestedTitle *string         `json:"suggested_title,omitempty"`
 }
 
 // JobResultsResponse handles both the rollup (/vision/jobs/{id}/results) envelope
@@ -369,7 +370,11 @@ func (a *autoVisionPlugin) tagScene(input common.PluginInput) (string, error) {
 	}
 	log.Infof("Job %s returned %d tags", jobID, len(results.Semantics.Tags))
 
-	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags, results.Semantics.SceneSummary)
+	suggestedTitle := ""
+	if results.Semantics.SuggestedTitle != nil {
+		suggestedTitle = *results.Semantics.SuggestedTitle
+	}
+	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags, results.Semantics.SceneSummary, suggestedTitle)
 	if err != nil {
 		return "", err
 	}
@@ -904,13 +909,13 @@ func (a *autoVisionPlugin) buildSemanticsParameters(scene *sceneInfo) SemanticsP
 
 // applyTagsToScene filters the classifier output through the exclusion lists,
 // resolves the merge/replace policy, optionally stages the classifier's
-// scene_summary as a details write (only when the scene has no existing
-// details AND the mergeSummaryWhenMissing setting is on), and writes the
-// scene via sceneUpdate. Returns the IDs actually written, the number of
-// classifier tags dropped by exclusions, and the effective policy string
-// (may be "merge" even when the user selected "replace" if the empty-list
-// safety net kicked in).
-func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag, summary string) ([]string, int, string, error) {
+// scene_summary as a details write and suggested_title as a title write
+// (each independently gated on its own "WhenMissing" setting + an emptiness
+// check on the current scene state), and writes the scene via sceneUpdate.
+// Returns the IDs actually written, the number of classifier tags dropped
+// by exclusions, and the effective policy string (may be "merge" even when
+// the user selected "replace" if the empty-list safety net kicked in).
+func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag, summary, title string) ([]string, int, string, error) {
 	autoTaggedTagID := getStringSetting(a.config, "autoTaggedTagId", "")
 
 	excluded, err := a.buildExclusionSet()
@@ -995,17 +1000,42 @@ func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierT
 	//   3. The classifier returned a non-empty scene_summary.
 	// When any condition fails, detailsToWrite stays nil and Stash's
 	// sceneUpdate mutation leaves the details field untouched.
+	//
+	// The classifier's LLM-generated summary separates paragraphs with
+	// double newlines (\n\n), which Stash renders as an extra blank line
+	// between paragraphs in the details field. Collapse runs of 2+
+	// newlines to a single newline so the stored text reflows cleanly.
+	// The loop handles \n\n\n and longer runs too, not just exact pairs.
 	var detailsToWrite *string
 	if getBoolSetting(a.config, "mergeSummaryWhenMissing", false) &&
 		strings.TrimSpace(scene.Details) == "" &&
 		strings.TrimSpace(summary) != "" {
 		s := summary
+		for strings.Contains(s, "\n\n") {
+			s = strings.ReplaceAll(s, "\n\n", "\n")
+		}
 		detailsToWrite = &s
 		log.Infof("Scene %s has empty details — writing classifier scene_summary (%d chars)",
 			string(scene.ID), len(s))
 	}
 
-	if err := a.updateScene(string(scene.ID), finalIDs, detailsToWrite); err != nil {
+	// Symmetric optional title write. Only applies when:
+	//   1. The mergeTitleWhenMissing setting is ON, AND
+	//   2. The scene's existing title field is empty, AND
+	//   3. The classifier returned a non-empty suggested_title.
+	// Non-empty titles are never overwritten — the plugin can only fill in
+	// missing titles, never replace user-assigned ones.
+	var titleToWrite *string
+	if getBoolSetting(a.config, "mergeTitleWhenMissing", false) &&
+		strings.TrimSpace(scene.Title) == "" &&
+		strings.TrimSpace(title) != "" {
+		t := title
+		titleToWrite = &t
+		log.Infof("Scene %s has empty title — writing classifier suggested_title (%d chars)",
+			string(scene.ID), len(t))
+	}
+
+	if err := a.updateScene(string(scene.ID), finalIDs, detailsToWrite, titleToWrite); err != nil {
 		return nil, 0, "", fmt.Errorf("sceneUpdate: %w", err)
 	}
 
@@ -1113,11 +1143,13 @@ type sceneFile struct {
 // sceneInfo carries only the fields the plugin actually reads: the id (for
 // sceneUpdate), the first file's path (for the submit request's `source`),
 // the tag list (for the already-tagged check and merge policy), and
-// details (so the mergeSummaryWhenMissing feature can tell whether the
-// scene's details field is empty before deciding whether to write the
-// classifier's scene_summary).
+// title/details (so the mergeTitleWhenMissing and mergeSummaryWhenMissing
+// features can tell whether the scene already has a description or title
+// before deciding whether to write the classifier's suggested_title /
+// scene_summary into the corresponding field).
 type sceneInfo struct {
 	ID      graphql.ID  `graphql:"id"`
+	Title   string      `graphql:"title"`
 	Details string      `graphql:"details"`
 	Files   []sceneFile `graphql:"files"`
 	Tags    []sceneTag  `graphql:"tags"`
@@ -1285,10 +1317,12 @@ func (a *autoVisionPlugin) findDescendantTags(parentID string) (map[string]bool,
 // -----------------------------------------------------------------------------
 
 // updateScene writes the scene via Stash's sceneUpdate mutation. Tags are
-// always written. Details is only written when `details` is non-nil — a nil
-// pointer serializes via `omitempty` as an absent field so Stash leaves the
-// scene's details alone.
-func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details *string) error {
+// always written. Details and Title are each only written when the
+// corresponding pointer is non-nil — a nil pointer serializes via
+// `omitempty` as an absent JSON field, which Stash's sceneUpdate interprets
+// as "leave this field untouched" (vs. an explicit null which would clear
+// the field).
+func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details, title *string) error {
 	// The Stash plugin util client has no HTTP timeout, so without a
 	// context deadline the mutation could hang forever if the server
 	// stalls. sceneUpdateTimeout bounds that at 30s.
@@ -1305,6 +1339,7 @@ func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details 
 		ID      graphql.ID   `json:"id"`
 		TagIDs  []graphql.ID `json:"tag_ids"`
 		Details *string      `json:"details,omitempty"`
+		Title   *string      `json:"title,omitempty"`
 	}
 
 	ids := make([]graphql.ID, 0, len(tagIDs))
@@ -1317,14 +1352,26 @@ func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details 
 			ID:      graphql.ID(sceneID),
 			TagIDs:  ids,
 			Details: details,
+			Title:   title,
 		},
 	}
 
-	detailsNote := ""
+	// Compose the log suffix so it lists every optional field that was
+	// included in the mutation. Scales to future additions without having
+	// to reshape the log line format.
+	var extras []string
 	if details != nil {
-		detailsNote = fmt.Sprintf(" + %d-char details", len(*details))
+		extras = append(extras, fmt.Sprintf("%d-char details", len(*details)))
 	}
-	log.Infof("sceneUpdate: writing %d tag_ids to scene %s%s", len(ids), sceneID, detailsNote)
+	if title != nil {
+		extras = append(extras, fmt.Sprintf("%d-char title", len(*title)))
+	}
+	extrasNote := ""
+	if len(extras) > 0 {
+		extrasNote = " + " + strings.Join(extras, " + ")
+	}
+
+	log.Infof("sceneUpdate: writing %d tag_ids to scene %s%s", len(ids), sceneID, extrasNote)
 	if err := a.graphqlClient.Mutate(ctx, &mutation, vars); err != nil {
 		return err
 	}
