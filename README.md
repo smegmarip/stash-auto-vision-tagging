@@ -10,8 +10,9 @@ Hybrid **Go RPC + JavaScript** plugin, structurally modelled on `stash-decensor`
 - **Batch mode** — queues every eligible scene for classification, one at a time, through Stash's worker queue. A configurable cooldown runs between scenes to throttle the GPU.
 - **Scene.Create.Post hook** — optionally auto-tags newly scanned scenes, skipping scenes that are already marked as classified.
 - **Dual-host routing** — supports two independent auto-vision API hosts (Vision Rollup and Semantics Service) with automatic submit-time fallover. The host that accepts the submit is pinned for all subsequent status and results reads.
-- **Flat + recursive tag exclusion** — drop unwanted classifier tags by ID, or by an ancestor whose entire subtree should be excluded.
+- **Flat + recursive tag exclusion** — drop unwanted classifier tags by ID, or by an ancestor whose entire subtree should be excluded. Exclusion applies to both the classifier's output _and_ any matching tags already on the scene, so a scene is always left in a state consistent with the current exclusion list.
 - **Merge or replace update policy** — default merge preserves existing scene tags and unions the classifier output on top; replace (opt-in) wipes the scene's existing tags first.
+- **Optional scene summary fill-in** — opt-in setting that writes the classifier's generated `scene_summary` into the scene's `details` field, but only for scenes whose `details` field is currently empty. Scenes that already have a description are never overwritten.
 
 ## Architecture
 
@@ -106,6 +107,7 @@ The plugin manifest (`auto-vision-tagging.yml`) and the plugin's Settings panel 
 - **Float-valued settings use STRING type.** Stash's `NUMBER` type is integer-only, so `Minimum Confidence` and `Minimum Frame Quality` are declared as STRING — enter decimal strings like `0.75`.
 - **Boolean settings default to `false`.** A Stash boolean toggle that has never been touched is indistinguishable in the UI from one explicitly set to false, so every boolean in the manifest is an explicit opt-in or opt-out of the non-default behavior. Setting names like `disableHierarchicalDecoding` (opt-out) and `useVisionModel` / `replaceExistingTags` (opt-in) make the direction explicit.
 - **Interval-based frame selection is not supported.** Only `sprite_sheet` (default) and `scene_based` are exposed.
+- **`Merge Summary When Details Empty`** (opt-in) — when ON, the plugin will write the classifier's `scene_summary` into the scene's `details` field on the same `sceneUpdate` call that writes tags, but only for scenes whose `details` field is currently empty or whitespace. Non-empty details are always preserved. When OFF (default), the plugin never touches the `details` field.
 
 ## Building from source
 
@@ -125,13 +127,18 @@ The `chmod +x` step is not optional — Stash silently fails to load an RPC plug
 
 The Go RPC binary emits a few structured log lines that the JS layer consumes and that make debugging easier:
 
-| Prefix | Meaning |
-|--------|---------|
-| `tagResult={…}` | Per-scene JSON outcome — scene_id, job_id, policy, list of applied tag ids, count of excluded tags. |
-| `fallbackEngaged=submit` | The primary submit host failed and the plugin successfully fell over to the fallback host. All subsequent reads for this task use the fallback host. |
-| `sceneUpdate: writing N tag_ids to scene X` | About to call Stash's `sceneUpdate` mutation. |
-| `sceneUpdate: scene X tags committed` | The mutation returned without error. If you see the "writing" line but not the "committed" line, the mutation hung or errored. |
-| `Cooldown: sleeping Ns before releasing worker slot` | Batch-queued scene is holding its worker slot for the configured cooldown so the next batch scene doesn't start immediately. Only emitted when the task was queued from batch mode. |
+| Prefix                                                                   | Meaning                                                                                                                                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tagResult={…}`                                                          | Per-scene JSON outcome — scene_id, job_id, policy, list of applied tag ids, count of excluded tags.                                                                                         |
+| `fallbackEngaged=submit`                                                 | The primary submit host failed and the plugin successfully fell over to the fallback host. All subsequent reads for this task use the fallback host.                                        |
+| `Exclusion: flat=[…] recursive=[…]`                                      | The exclusion settings as read at the start of the task. Useful to confirm the plugin actually saw the IDs you configured.                                                                  |
+| `Exclusion: parent <id> → N descendants`                                 | For each `excludedTagIdsRecursive` entry, the number of descendant tags found via Stash's tag hierarchy.                                                                                    |
+| `Exclusion: total excluded tag IDs=N`                                    | Size of the merged exclusion set that will be applied to both the classifier output and the scene's pre-existing tags.                                                                      |
+| `Exclusion: removed K pre-existing tag(s) from scene X`                  | Pre-existing scene tags that matched the exclusion set and were evicted during a merge-policy update. Only fires when K > 0.                                                                |
+| `Scene X has empty details — writing classifier scene_summary (N chars)` | The `Merge Summary When Details Empty` feature fired for this scene. Only emitted when the setting is ON, the scene's `details` was empty, and the classifier produced a non-empty summary. |
+| `sceneUpdate: writing N tag_ids to scene X`                              | About to call Stash's `sceneUpdate` mutation. Appends ` + M-char details` when a summary write is bundled into the same mutation.                                                           |
+| `sceneUpdate: scene X committed`                                         | The mutation returned without error. If you see the "writing" line but not the "committed" line, the mutation hung or errored.                                                              |
+| `Cooldown: sleeping Ns before releasing worker slot`                     | Batch-queued scene is holding its worker slot for the configured cooldown so the next batch scene doesn't start immediately. Only emitted when the task was queued from batch mode.         |
 
 ## Repository layout
 

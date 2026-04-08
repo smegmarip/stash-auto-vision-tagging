@@ -211,7 +211,8 @@ type ClassifierTag struct {
 }
 
 type SemanticsOutcome struct {
-	Tags []ClassifierTag `json:"tags"`
+	Tags         []ClassifierTag `json:"tags"`
+	SceneSummary string          `json:"scene_summary,omitempty"`
 }
 
 // JobResultsResponse handles both the rollup (/vision/jobs/{id}/results) envelope
@@ -368,7 +369,7 @@ func (a *autoVisionPlugin) tagScene(input common.PluginInput) (string, error) {
 	}
 	log.Infof("Job %s returned %d tags", jobID, len(results.Semantics.Tags))
 
-	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags)
+	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags, results.Semantics.SceneSummary)
 	if err != nil {
 		return "", err
 	}
@@ -902,11 +903,14 @@ func (a *autoVisionPlugin) buildSemanticsParameters(scene *sceneInfo) SemanticsP
 // -----------------------------------------------------------------------------
 
 // applyTagsToScene filters the classifier output through the exclusion lists,
-// resolves the merge/replace policy, and writes the scene via sceneUpdate.
-// Returns the IDs actually written, the number of classifier tags dropped by
-// exclusions, and the effective policy string used (may be "merge" even when
-// the user selected "replace" if the empty-list safety net kicked in).
-func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag) ([]string, int, string, error) {
+// resolves the merge/replace policy, optionally stages the classifier's
+// scene_summary as a details write (only when the scene has no existing
+// details AND the mergeSummaryWhenMissing setting is on), and writes the
+// scene via sceneUpdate. Returns the IDs actually written, the number of
+// classifier tags dropped by exclusions, and the effective policy string
+// (may be "merge" even when the user selected "replace" if the empty-list
+// safety net kicked in).
+func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag, summary string) ([]string, int, string, error) {
 	autoTaggedTagID := getStringSetting(a.config, "autoTaggedTagId", "")
 
 	excluded, err := a.buildExclusionSet()
@@ -984,7 +988,24 @@ func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierT
 		}
 	}
 
-	if err := a.sceneUpdateTags(string(scene.ID), finalIDs); err != nil {
+	// Optionally stage a details write. Only applies when:
+	//   1. The mergeSummaryWhenMissing setting is ON, AND
+	//   2. The scene's existing details field is empty (we never overwrite
+	//      a scene the user has already described), AND
+	//   3. The classifier returned a non-empty scene_summary.
+	// When any condition fails, detailsToWrite stays nil and Stash's
+	// sceneUpdate mutation leaves the details field untouched.
+	var detailsToWrite *string
+	if getBoolSetting(a.config, "mergeSummaryWhenMissing", false) &&
+		strings.TrimSpace(scene.Details) == "" &&
+		strings.TrimSpace(summary) != "" {
+		s := summary
+		detailsToWrite = &s
+		log.Infof("Scene %s has empty details — writing classifier scene_summary (%d chars)",
+			string(scene.ID), len(s))
+	}
+
+	if err := a.updateScene(string(scene.ID), finalIDs, detailsToWrite); err != nil {
 		return nil, 0, "", fmt.Errorf("sceneUpdate: %w", err)
 	}
 
@@ -1089,14 +1110,17 @@ type sceneFile struct {
 	Path string `graphql:"path"`
 }
 
-// sceneInfo carries only the fields the plugin actually uses: the id (for
+// sceneInfo carries only the fields the plugin actually reads: the id (for
 // sceneUpdate), the first file's path (for the submit request's `source`),
-// and the tag list (for the already-tagged check and the merge policy).
-// Anything else the service needs it queries from Stash itself.
+// the tag list (for the already-tagged check and merge policy), and
+// details (so the mergeSummaryWhenMissing feature can tell whether the
+// scene's details field is empty before deciding whether to write the
+// classifier's scene_summary).
 type sceneInfo struct {
-	ID    graphql.ID  `graphql:"id"`
-	Files []sceneFile `graphql:"files"`
-	Tags  []sceneTag  `graphql:"tags"`
+	ID      graphql.ID  `graphql:"id"`
+	Details string      `graphql:"details"`
+	Files   []sceneFile `graphql:"files"`
+	Tags    []sceneTag  `graphql:"tags"`
 }
 
 func (a *autoVisionPlugin) findScene(sceneID string) (*sceneInfo, error) {
@@ -1260,7 +1284,11 @@ func (a *autoVisionPlugin) findDescendantTags(parentID string) (map[string]bool,
 // GraphQL: sceneUpdate
 // -----------------------------------------------------------------------------
 
-func (a *autoVisionPlugin) sceneUpdateTags(sceneID string, tagIDs []string) error {
+// updateScene writes the scene via Stash's sceneUpdate mutation. Tags are
+// always written. Details is only written when `details` is non-nil — a nil
+// pointer serializes via `omitempty` as an absent field so Stash leaves the
+// scene's details alone.
+func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details *string) error {
 	// The Stash plugin util client has no HTTP timeout, so without a
 	// context deadline the mutation could hang forever if the server
 	// stalls. sceneUpdateTimeout bounds that at 30s.
@@ -1274,8 +1302,9 @@ func (a *autoVisionPlugin) sceneUpdateTags(sceneID string, tagIDs []string) erro
 	}
 
 	type SceneUpdateInput struct {
-		ID     graphql.ID   `json:"id"`
-		TagIDs []graphql.ID `json:"tag_ids"`
+		ID      graphql.ID   `json:"id"`
+		TagIDs  []graphql.ID `json:"tag_ids"`
+		Details *string      `json:"details,omitempty"`
 	}
 
 	ids := make([]graphql.ID, 0, len(tagIDs))
@@ -1285,16 +1314,21 @@ func (a *autoVisionPlugin) sceneUpdateTags(sceneID string, tagIDs []string) erro
 
 	vars := map[string]interface{}{
 		"input": SceneUpdateInput{
-			ID:     graphql.ID(sceneID),
-			TagIDs: ids,
+			ID:      graphql.ID(sceneID),
+			TagIDs:  ids,
+			Details: details,
 		},
 	}
 
-	log.Infof("sceneUpdate: writing %d tag_ids to scene %s", len(ids), sceneID)
+	detailsNote := ""
+	if details != nil {
+		detailsNote = fmt.Sprintf(" + %d-char details", len(*details))
+	}
+	log.Infof("sceneUpdate: writing %d tag_ids to scene %s%s", len(ids), sceneID, detailsNote)
 	if err := a.graphqlClient.Mutate(ctx, &mutation, vars); err != nil {
 		return err
 	}
-	log.Infof("sceneUpdate: scene %s tags committed", sceneID)
+	log.Infof("sceneUpdate: scene %s committed", sceneID)
 	return nil
 }
 

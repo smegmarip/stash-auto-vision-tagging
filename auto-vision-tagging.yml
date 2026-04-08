@@ -124,6 +124,10 @@ settings:
     displayName: Replace Existing Tags
     description: "OFF (default) → merge: new tags are unioned with the scene's existing tags. ON → replace: the scene's existing tags are DISCARDED before applying new ones. WARNING: the replace path is destructive and cannot be undone."
     type: BOOLEAN
+  mergeSummaryWhenMissing:
+    displayName: Merge Summary When Details Empty
+    description: "OFF (default) → the plugin never touches the scene's details field. ON → when the scene's details field is empty AND the classifier returned a non-empty scene_summary, the plugin writes that summary into details as part of the same sceneUpdate that writes tags. Scenes that already have any details content are left untouched."
+    type: BOOLEAN
 
   # --- Batch / hook ---
   batchTagId:
