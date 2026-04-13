@@ -774,11 +774,10 @@
       }
       cells.push(el('td', { key: 'tags', className: 'tags-data' },
         tags.map(function (tag) {
-          var colorClass = hasTaxonomy ? getTagColorClass(tag.id, includeSet, excludeSet) : 'tm-tag-neutral';
-          return el(Badge, {
+          var colorClass = hasTaxonomy ? getTagColorClass(tag.id, includeSet, excludeSet) : '';
+          return el('span', {
             key: tag.id,
-            variant: 'secondary',
-            className: colorClass,
+            className: 'tag-item d-inline-block badge badge-secondary' + (colorClass ? ' ' + colorClass : ''),
           }, tag.name);
         })
       ));

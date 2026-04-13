@@ -200,14 +200,23 @@
 .tm-page .table-list .cover_image-head {
   width: 90px;
 }
+.tm-page .table-list .duration-data,
+.tm-page .table-list .duration-head {
+  width: 70px;
+}
+/* Tag badges — match native tagger view: tag-item d-inline-block badge badge-secondary */
 .tm-page .table-list .tags-data {
-  max-width: 400px;
+  white-space: normal !important;
 }
 .tm-page .table-list .tags-data .badge {
-  margin: 1px;
-  font-size: 0.75rem;
+  margin: 3px;
+  font-size: 12px;
   font-weight: 400;
+  line-height: 16px;
+  padding: 2px 6px;
+  border-radius: 3.5px;
   cursor: default;
+  white-space: nowrap;
 }
 
 /* --- Edit Filter modal --- */
