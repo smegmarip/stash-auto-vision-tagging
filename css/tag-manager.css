@@ -133,7 +133,6 @@
   display: flex;
   align-items: center;
   padding: 0.15rem 0.35rem;
-  font-size: 0.85rem;
 }
 .tm-tag-row:hover {
   background: rgba(255,255,255,0.05);

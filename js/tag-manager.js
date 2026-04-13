@@ -254,9 +254,8 @@
       el('div', { className: 'tm-tag-control' },
         el('div', { className: 'tm-tag-control-search' },
           el(Form.Control, {
-            size: 'sm',
-            type: 'text',
-            placeholder: 'Search...',
+            className: 'clearable-text-field',
+            placeholder: 'Search\u2026',
             value: search,
             onChange: function (e) { setSearch(e.target.value); },
           })
@@ -451,20 +450,19 @@
     var onSortFieldChange = props.onSortFieldChange;
     var onSortDirToggle = props.onSortDirToggle;
 
-    return el('div', { className: 'sort-by-select dropdown btn-group', role: 'group' },
-      el(Dropdown, null,
-        el(Dropdown.Toggle, { variant: 'secondary' },
-          SORT_OPTIONS.find(function (o) { return o.value === sortField; })?.label || sortField
-        ),
-        el(Dropdown.Menu, null,
-          SORT_OPTIONS.map(function (opt) {
-            return el(Dropdown.Item, {
-              key: opt.value,
-              active: opt.value === sortField,
-              onClick: function () { onSortFieldChange(opt.value); },
-            }, opt.label);
-          })
-        )
+    return el(Dropdown, { as: Bootstrap.ButtonGroup, className: 'sort-by-select' },
+      el(Dropdown.Toggle, { variant: 'secondary' },
+        SORT_OPTIONS.find(function (o) { return o.value === sortField; })?.label || sortField
+      ),
+      el(Dropdown.Menu, { className: 'bg-secondary text-white' },
+        SORT_OPTIONS.map(function (opt) {
+          return el(Dropdown.Item, {
+            key: opt.value,
+            active: opt.value === sortField,
+            className: 'bg-secondary text-white',
+            onClick: function () { onSortFieldChange(opt.value); },
+          }, opt.label);
+        })
       ),
       el(Button, {
         variant: 'secondary',
@@ -483,7 +481,7 @@
   function PerPageSelect(props) {
     return el(Form.Control, {
       as: 'select',
-      className: 'btn-secondary',
+      className: 'btn-secondary page-size-selector',
       value: props.value,
       onChange: function (e) { props.onChange(Number(e.target.value)); },
     },
@@ -505,7 +503,7 @@
       el(Dropdown.Toggle, { variant: 'secondary' },
         el(api.components.Icon, { icon: FA.faCog })
       ),
-      el(Dropdown.Menu, null,
+      el(Dropdown.Menu, { className: 'bg-secondary text-white' },
         ALL_COLUMNS.map(function (col) {
           return el(Dropdown.Item, {
             key: col.key,
@@ -627,7 +625,7 @@
               el('div', null,
                 el('div', { className: 'd-flex align-items-center mb-2', style: { gap: '0.5rem' } },
                   el(Form.Control, {
-                    as: 'select', size: 'sm', value: props.filterPathModifier,
+                    as: 'select', className: 'btn-secondary', value: props.filterPathModifier,
                     onChange: function (e) { props.onFilterPathModifierChange(e.target.value); },
                     style: { width: 'auto' },
                   },
@@ -636,14 +634,14 @@
                   )
                 ),
                 el(Form.Control, {
-                  size: 'sm', type: 'text', placeholder: 'File path\u2026',
+                  className: 'clearable-text-field', placeholder: 'File path\u2026',
                   value: props.filterPath,
                   onChange: function (e) { props.onFilterPathChange(e.target.value); },
                 })
               )
             ),
             filterCard('organized', 'Organized', props.filterOrganized !== null,
-              el('div', null,
+              el('div', { className: 'boolean-filter' },
                 el(Form.Check, { type: 'radio', label: 'Any', name: 'tm-org', checked: props.filterOrganized === null, onChange: function () { props.onFilterOrganizedChange(null); }, id: 'tm-org-any' }),
                 el(Form.Check, { type: 'radio', label: 'Organized', name: 'tm-org', checked: props.filterOrganized === true, onChange: function () { props.onFilterOrganizedChange(true); }, id: 'tm-org-yes' }),
                 el(Form.Check, { type: 'radio', label: 'Not Organized', name: 'tm-org', checked: props.filterOrganized === false, onChange: function () { props.onFilterOrganizedChange(false); }, id: 'tm-org-no' })
@@ -674,6 +672,7 @@
         el('div', { className: 'saved-filter-dropdown dropdown btn-group', role: 'group' },
           el(Button, {
               variant: props.hasActiveFilter ? 'primary' : 'secondary',
+              className: 'filter-button',
               onClick: props.onFilterToggle,
               title: 'Edit Filter',
             },
@@ -687,9 +686,7 @@
         onSortFieldChange: props.onSortFieldChange,
         onSortDirToggle: props.onSortDirToggle,
       }),
-      el('div', { className: 'page-size-selector' },
-        el(PerPageSelect, { value: props.perPage, onChange: props.onPerPageChange }),
-      ),
+      el(PerPageSelect, { value: props.perPage, onChange: props.onPerPageChange }),
       el(ColumnConfigDropdown, { visible: props.visibleColumns, onChange: props.onColumnsChange })
     );
   }
