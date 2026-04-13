@@ -6,6 +6,8 @@ Hybrid **Go RPC + JavaScript** plugin, structurally modelled on `stash-decensor`
 
 ## Features
 
+### Classification
+
 - **Per-scene toolbar button** — click the tag icon on any scene page to classify that scene. A progress overlay tracks the running job and a toast reports the result.
 - **Batch mode** — queues every eligible scene for classification, one at a time, through Stash's worker queue. A configurable cooldown runs between scenes to throttle the GPU.
 - **Scene.Create.Post hook** — optionally auto-tags newly scanned scenes, skipping scenes that are already marked as classified.
@@ -13,6 +15,15 @@ Hybrid **Go RPC + JavaScript** plugin, structurally modelled on `stash-decensor`
 - **Flat + recursive tag exclusion** — drop unwanted classifier tags by ID, or by an ancestor whose entire subtree should be excluded. Exclusion applies to both the classifier's output _and_ any matching tags already on the scene, so a scene is always left in a state consistent with the current exclusion list.
 - **Merge or replace update policy** — default merge preserves existing scene tags and unions the classifier output on top; replace (opt-in) wipes the scene's existing tags first.
 - **Optional scene summary + title fill-in** — two independent opt-in settings that write the classifier's generated `scene_summary` into the scene's `details` field and/or its `suggested_title` into the scene's `title` field, but only for scenes whose corresponding field is currently empty. Non-empty descriptions and titles are never overwritten.
+
+### Tag Manager
+
+A dedicated page at `/plugins/tag-manager` (accessible via the tags icon in Stash's nav bar) for reviewing and curating tags across scenes in bulk.
+
+- **Scene list view** — compact table with cover thumbnails, configurable columns (title, duration, date, tags, studio, performers, rating, file path), sort, per-page, and pagination matching the native Stash scenes page.
+- **Edit Filter** — modal dialog with accordion-style filter sections for Tags (include/exclude with sub-tag hierarchy), Path (contains or regex match), and Organized (tri-state). Filters apply live to the GraphQL query.
+- **Taxonomy color coding** — dual TagSelect typeahead bar for visually classifying tags across all visible scenes. Tags matching the "Include" set appear as green badges; "Exclude" as red; conflicts as amber; unmatched as gray. Optional "Include sub-tags" recursion and "Group by membership" sorting within each row.
+- **Batch tag operations** — select scenes via checkboxes, then "Remove excluded tags" or "Add included tags" (leaf tags only) with a confirmation modal. Uses `bulkSceneUpdate` for efficient multi-scene mutations.
 
 ## Architecture
 
@@ -153,9 +164,12 @@ stash-auto-vision-tagging/
 │   ├── go.mod / go.sum
 │   ├── main.go                           ← RPC entry, HTTP + GraphQL
 │   └── stash-auto-vision-tagging-rpc     ← committed linux/amd64 build
-└── js/
-    ├── stashFunctions.js                 ← thin Stash GraphQL helpers
-    └── auto-vision-tagging.js            ← toolbar button, progress UI, log polling
+├── js/
+│   ├── stashFunctions.js                 ← thin Stash GraphQL helpers
+│   ├── auto-vision-tagging.js            ← toolbar button, progress UI, log polling
+│   └── tag-manager.js                    ← Tag Manager page (route, taxonomy, filters, batch ops)
+└── css/
+    └── tag-manager.css                   ← Tag Manager styling and color-coding classes
 ```
 
 ## Credits

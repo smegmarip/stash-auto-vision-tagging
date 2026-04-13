@@ -1,0 +1,237 @@
+/* === Tag Manager — tag color coding === */
+
+.tm-tag-included {
+  background-color: #28a745 !important;
+  color: #fff !important;
+}
+.tm-tag-excluded {
+  background-color: #dc3545 !important;
+  color: #fff !important;
+}
+.tm-tag-conflict {
+  background-color: #ffc107 !important;
+  color: #212529 !important;
+}
+.tm-tag-neutral {
+  background-color: #6c757d !important;
+  color: #fff !important;
+}
+
+/* === Page layout === */
+
+.tm-page {
+  padding: 1rem;
+}
+
+/* --- Toolbar (extends native .filtered-list-toolbar) --- */
+
+.tm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+/* --- Pagination count text --- */
+
+.tm-pagination-count {
+  font-size: 0.85rem;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+/* --- Taxonomy control (dual TagSelect bar) --- */
+
+.tm-taxonomy {
+  margin-bottom: 0.75rem;
+}
+.tm-taxonomy-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.tm-taxonomy-select {
+  flex: 1;
+  min-width: 200px;
+}
+.tm-taxonomy-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+  display: block;
+}
+.tm-label-include {
+  color: #28a745;
+}
+.tm-label-exclude {
+  color: #dc3545;
+}
+/* Color the selected pills inside TagSelect */
+.tm-taxonomy-include .react-select__multi-value {
+  background-color: #28a74533;
+  border: 1px solid #28a745;
+}
+.tm-taxonomy-include .react-select__multi-value__label {
+  color: #28a745;
+}
+.tm-taxonomy-exclude .react-select__multi-value {
+  background-color: #dc354533;
+  border: 1px solid #dc3545;
+}
+.tm-taxonomy-exclude .react-select__multi-value__label {
+  color: #dc3545;
+}
+.tm-taxonomy-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-self: center;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+/* --- Pills (confirmation modal, filter selections) --- */
+
+.tm-taxonomy-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  min-height: 1.5rem;
+}
+.tm-taxonomy-pills .badge {
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+/* --- Tag include/exclude control (used in Edit Filter modal) --- */
+
+.tm-tag-control {
+  max-height: 250px;
+  max-width: 500px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.1);
+}
+.tm-tag-control-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.25rem;
+  background: inherit;
+}
+.tm-tag-control-search input {
+  width: 100%;
+  font-size: 0.85rem;
+}
+.tm-tag-row {
+  display: flex;
+  align-items: center;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.85rem;
+}
+.tm-tag-row:hover {
+  background: rgba(255,255,255,0.05);
+}
+.tm-tag-row .tm-tag-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-tag-row .btn {
+  padding: 0.1rem 0.4rem;
+  line-height: 1.2;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.tm-tag-row .btn-include {
+  color: #28a745;
+}
+.tm-tag-row .btn-exclude {
+  color: #dc3545;
+}
+
+/* --- Batch action bar --- */
+
+.tm-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  background: rgba(0,100,200,0.1);
+}
+.tm-batch-bar .tm-batch-count {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Scene table (extends native .table-list .scene-table) --- */
+
+.tm-page .table-list .table {
+  font-size: 0.85rem;
+}
+.tm-page .table-list .table th {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.tm-page .table-list .table td {
+  vertical-align: middle;
+}
+.tm-page .table-list .image-thumbnail {
+  width: 80px;
+  height: auto;
+  border-radius: 2px;
+}
+.tm-page .table-list .select-col {
+  width: 30px;
+  text-align: center;
+}
+.tm-page .table-list .cover_image-data,
+.tm-page .table-list .cover_image-head {
+  width: 90px;
+}
+.tm-page .table-list .tags-data {
+  max-width: 400px;
+}
+.tm-page .table-list .tags-data .badge {
+  margin: 1px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  cursor: default;
+}
+
+/* --- Edit Filter modal --- */
+
+.tm-filter-modal .modal-header {
+  display: flex;
+  align-items: center;
+}
+.tm-filter-section {
+  margin-bottom: 0.75rem;
+}
+.tm-filter-section-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  font-weight: 500;
+  user-select: none;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.tm-filter-section-header:hover {
+  color: #fff;
+}
+.tm-filter-section-body {
+  padding: 0.5rem 0 0 0;
+}

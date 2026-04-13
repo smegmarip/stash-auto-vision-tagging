@@ -10,6 +10,9 @@ ui:
     - https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js
     - js/stashFunctions.js
     - js/auto-vision-tagging.js
+    - js/tag-manager.js
+  css:
+    - css/tag-manager.css
 
 exec:
   - gorpc/stash-auto-vision-tagging-rpc
