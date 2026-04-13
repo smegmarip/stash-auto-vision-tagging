@@ -219,28 +219,5 @@
   white-space: nowrap;
 }
 
-/* --- Edit Filter modal --- */
-
-.tm-filter-modal .modal-header {
-  display: flex;
-  align-items: center;
-}
-.tm-filter-section {
-  margin-bottom: 0.75rem;
-}
-.tm-filter-section-header {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0;
-  font-weight: 500;
-  user-select: none;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-.tm-filter-section-header:hover {
-  color: #fff;
-}
-.tm-filter-section-body {
-  padding: 0.5rem 0 0 0;
-}
+/* --- Edit Filter modal (inherits native .edit-filter-dialog styles) --- */
+/* Only overrides needed for the tag include/exclude control within the filter */

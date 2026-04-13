@@ -453,7 +453,7 @@
 
     return el('div', { className: 'sort-by-select dropdown btn-group', role: 'group' },
       el(Dropdown, null,
-        el(Dropdown.Toggle, { variant: 'secondary', size: 'sm' },
+        el(Dropdown.Toggle, { variant: 'secondary' },
           SORT_OPTIONS.find(function (o) { return o.value === sortField; })?.label || sortField
         ),
         el(Dropdown.Menu, null,
@@ -468,7 +468,6 @@
       ),
       el(Button, {
         variant: 'secondary',
-        size: 'sm',
         onClick: onSortDirToggle,
         title: sortDir === 'DESC' ? 'Descending' : 'Ascending',
       },
@@ -484,8 +483,7 @@
   function PerPageSelect(props) {
     return el(Form.Control, {
       as: 'select',
-      size: 'sm',
-      className: 'page-size-selector',
+      className: 'btn-secondary',
       value: props.value,
       onChange: function (e) { props.onChange(Number(e.target.value)); },
     },
@@ -504,7 +502,7 @@
     var onChange = props.onChange;
 
     return el(Dropdown, null,
-      el(Dropdown.Toggle, { variant: 'secondary', size: 'sm' },
+      el(Dropdown.Toggle, { variant: 'secondary' },
         el(api.components.Icon, { icon: FA.faCog })
       ),
       el(Dropdown.Menu, null,
@@ -537,15 +535,13 @@
 
   function EditFilterModal(props) {
     var allTags = props.allTags;
+    var Accordion = Bootstrap.Accordion;
+    var Card = Bootstrap.Card;
+    var Icon = api.components.Icon;
+
     // Accordion: only one section open at a time (null = all closed)
     var openSectionState = useState('tags');
     var openSection = openSectionState[0]; var setOpenSection = openSectionState[1];
-    function toggleSection(name) {
-      setOpenSection(function (prev) { return prev === name ? null : name; });
-    }
-    var tagsOpen = openSection === 'tags';
-    var pathOpen = openSection === 'path';
-    var orgOpen = openSection === 'organized';
 
     var hasAnyFilter = props.filterTagIncludeIds.length > 0 ||
       props.filterTagExcludeIds.length > 0 ||
@@ -561,131 +557,109 @@
       props.onFilterOrganizedChange(null);
     }
 
+    function clearSection(key) {
+      if (key === 'tags') { props.onFilterTagIncludeChange([]); props.onFilterTagExcludeChange([]); props.onFilterTagDepthChange(0); }
+      if (key === 'path') { props.onFilterPathChange(''); props.onFilterPathModifierChange('INCLUDES'); }
+      if (key === 'organized') { props.onFilterOrganizedChange(null); }
+    }
+
+    function filterCard(key, label, hasValue, body) {
+      return el(Card, { key: key },
+        el(Accordion.Toggle, {
+          eventKey: key,
+          className: 'filter-item-header',
+        },
+          el('span', { className: 'mr-auto' },
+            el(Icon, { className: 'collapse-icon fa-fw', icon: openSection === key ? FA.faChevronDown : FA.faChevronRight }),
+            ' ' + label
+          ),
+          hasValue && el(Button, {
+            className: 'remove-criterion-button',
+            variant: 'minimal',
+            onClick: function (e) { e.stopPropagation(); clearSection(key); },
+          }, el(Icon, { icon: FA.faTimes }))
+        ),
+        el(Accordion.Collapse, { eventKey: key },
+          el(Card.Body, null, body)
+        )
+      );
+    }
+
     return el(Modal, {
       show: props.show,
       onHide: props.onClose,
-      centered: true,
-      size: 'lg',
-      className: 'tm-filter-modal',
+      className: 'edit-filter-dialog',
     },
-      el(Modal.Header, { closeButton: true },
-        el(Modal.Title, null, 'Edit Filter'),
-        el('div', { style: { marginLeft: 'auto', paddingRight: '1rem' } },
-          el(Form.Control, {
-            size: 'sm',
-            type: 'text',
-            placeholder: 'Search...',
-            style: { width: '200px' },
-          })
-        )
+      el(Modal.Header, null,
+        el('div', null, 'Edit Filter'),
+        el(Form.Control, {
+          className: 'btn-secondary search-input',
+          type: 'text',
+          placeholder: 'Search\u2026',
+        })
       ),
       el(Modal.Body, null,
-        // Tags section
-        el('div', { className: 'tm-filter-section' },
-          el('div', {
-            className: 'tm-filter-section-header',
-            onClick: function () { toggleSection('tags'); },
+        el('div', { className: 'dialog-content' },
+          el(Accordion, {
+            className: 'criterion-list',
+            activeKey: openSection,
+            onSelect: function (k) { setOpenSection(k === openSection ? null : k); },
           },
-            el(api.components.Icon, { icon: tagsOpen ? FA.faChevronDown : FA.faChevronRight }),
-            el('span', null, ' Tags'),
-            props.filterTagIncludeIds.length + props.filterTagExcludeIds.length > 0 &&
-              el(Badge, { variant: 'info', className: 'ml-2' },
-                props.filterTagIncludeIds.length + props.filterTagExcludeIds.length
-              )
-          ),
-          tagsOpen && el('div', { className: 'tm-filter-section-body' },
-            el(Form.Check, {
-              type: 'checkbox',
-              label: 'Include sub-tags',
-              checked: props.filterTagDepth === -1,
-              onChange: function (e) { props.onFilterTagDepthChange(e.target.checked ? -1 : 0); },
-              id: 'tm-filter-tag-depth',
-              className: 'mb-2',
-            }),
-            el(TagIncludeExcludeControl, {
-              allTags: allTags,
-              includedIds: props.filterTagIncludeIds,
-              excludedIds: props.filterTagExcludeIds,
-              onIncludedChange: props.onFilterTagIncludeChange,
-              onExcludedChange: props.onFilterTagExcludeChange,
-            })
-          )
-        ),
-
-        // Path section
-        el('div', { className: 'tm-filter-section' },
-          el('div', {
-            className: 'tm-filter-section-header',
-            onClick: function () { toggleSection('path'); },
-          },
-            el(api.components.Icon, { icon: pathOpen ? FA.faChevronDown : FA.faChevronRight }),
-            el('span', null, ' Path'),
-            props.filterPath && el(Badge, { variant: 'info', className: 'ml-2' }, '1')
-          ),
-          pathOpen && el('div', { className: 'tm-filter-section-body' },
-            el('div', { className: 'd-flex align-items-center mb-2', style: { gap: '0.5rem' } },
-              el(Form.Control, {
-                as: 'select',
-                size: 'sm',
-                value: props.filterPathModifier,
-                onChange: function (e) { props.onFilterPathModifierChange(e.target.value); },
-                style: { width: 'auto' },
-              },
-                el('option', { value: 'INCLUDES' }, 'Contains'),
-                el('option', { value: 'MATCHES_REGEX' }, 'Matches Regex')
+            filterCard('tags', 'Tags',
+              props.filterTagIncludeIds.length + props.filterTagExcludeIds.length > 0,
+              el('div', null,
+                el(Form.Check, {
+                  type: 'checkbox', label: 'Include sub-tags',
+                  checked: props.filterTagDepth === -1,
+                  onChange: function (e) { props.onFilterTagDepthChange(e.target.checked ? -1 : 0); },
+                  id: 'tm-filter-tag-depth', className: 'mb-2',
+                }),
+                el(TagIncludeExcludeControl, {
+                  allTags: allTags,
+                  includedIds: props.filterTagIncludeIds,
+                  excludedIds: props.filterTagExcludeIds,
+                  onIncludedChange: props.onFilterTagIncludeChange,
+                  onExcludedChange: props.onFilterTagExcludeChange,
+                })
               )
             ),
-            el(Form.Control, {
-              size: 'sm',
-              type: 'text',
-              placeholder: 'File path...',
-              value: props.filterPath,
-              onChange: function (e) { props.onFilterPathChange(e.target.value); },
-            })
-          )
-        ),
-
-        // Organized section
-        el('div', { className: 'tm-filter-section' },
-          el('div', {
-            className: 'tm-filter-section-header',
-            onClick: function () { toggleSection('organized'); },
-          },
-            el(api.components.Icon, { icon: orgOpen ? FA.faChevronDown : FA.faChevronRight }),
-            el('span', null, ' Organized'),
-            props.filterOrganized !== null && el(Badge, { variant: 'info', className: 'ml-2' }, '1')
-          ),
-          orgOpen && el('div', { className: 'tm-filter-section-body' },
-            el(Form.Check, {
-              type: 'radio',
-              label: 'Any',
-              name: 'tm-org',
-              checked: props.filterOrganized === null,
-              onChange: function () { props.onFilterOrganizedChange(null); },
-              id: 'tm-org-any',
-            }),
-            el(Form.Check, {
-              type: 'radio',
-              label: 'Organized',
-              name: 'tm-org',
-              checked: props.filterOrganized === true,
-              onChange: function () { props.onFilterOrganizedChange(true); },
-              id: 'tm-org-yes',
-            }),
-            el(Form.Check, {
-              type: 'radio',
-              label: 'Not Organized',
-              name: 'tm-org',
-              checked: props.filterOrganized === false,
-              onChange: function () { props.onFilterOrganizedChange(false); },
-              id: 'tm-org-no',
-            })
+            filterCard('path', 'Path', !!props.filterPath,
+              el('div', null,
+                el('div', { className: 'd-flex align-items-center mb-2', style: { gap: '0.5rem' } },
+                  el(Form.Control, {
+                    as: 'select', size: 'sm', value: props.filterPathModifier,
+                    onChange: function (e) { props.onFilterPathModifierChange(e.target.value); },
+                    style: { width: 'auto' },
+                  },
+                    el('option', { value: 'INCLUDES' }, 'Contains'),
+                    el('option', { value: 'MATCHES_REGEX' }, 'Matches Regex')
+                  )
+                ),
+                el(Form.Control, {
+                  size: 'sm', type: 'text', placeholder: 'File path\u2026',
+                  value: props.filterPath,
+                  onChange: function (e) { props.onFilterPathChange(e.target.value); },
+                })
+              )
+            ),
+            filterCard('organized', 'Organized', props.filterOrganized !== null,
+              el('div', null,
+                el(Form.Check, { type: 'radio', label: 'Any', name: 'tm-org', checked: props.filterOrganized === null, onChange: function () { props.onFilterOrganizedChange(null); }, id: 'tm-org-any' }),
+                el(Form.Check, { type: 'radio', label: 'Organized', name: 'tm-org', checked: props.filterOrganized === true, onChange: function () { props.onFilterOrganizedChange(true); }, id: 'tm-org-yes' }),
+                el(Form.Check, { type: 'radio', label: 'Not Organized', name: 'tm-org', checked: props.filterOrganized === false, onChange: function () { props.onFilterOrganizedChange(false); }, id: 'tm-org-no' })
+              )
+            )
           )
         )
       ),
       el(Modal.Footer, null,
-        hasAnyFilter && el(Button, { variant: 'outline-warning', size: 'sm', onClick: handleClear }, 'Clear All'),
-        el(Button, { variant: 'secondary', size: 'sm', onClick: props.onClose }, 'Close')
+        el('div', null,
+          hasAnyFilter && el(Button, { variant: 'secondary', onClick: handleClear }, 'Clear All')
+        ),
+        el('div', null,
+          el(Button, { variant: 'secondary', onClick: props.onClose }, 'Cancel'),
+          el(Button, { onClick: props.onClose }, 'Apply')
+        )
       )
     );
   }
@@ -696,13 +670,16 @@
 
   function Toolbar(props) {
     return el('div', { className: 'tm-toolbar filtered-list-toolbar btn-toolbar', role: 'toolbar' },
-      el(Button, {
-        variant: props.hasActiveFilter ? 'primary' : 'secondary',
-        size: 'sm',
-        onClick: props.onFilterToggle,
-        title: 'Edit Filter',
-      },
-        el(api.components.Icon, { icon: FA.faFilter })
+      el('div', { className: 'btn-group', role: 'group' },
+        el('div', { className: 'saved-filter-dropdown dropdown btn-group', role: 'group' },
+          el(Button, {
+              variant: props.hasActiveFilter ? 'primary' : 'secondary',
+              onClick: props.onFilterToggle,
+              title: 'Edit Filter',
+            },
+            el(api.components.Icon, { icon: FA.faFilter })
+          ),
+        ),
       ),
       el(SortControl, {
         sortField: props.sortField,
@@ -710,7 +687,9 @@
         onSortFieldChange: props.onSortFieldChange,
         onSortDirToggle: props.onSortDirToggle,
       }),
-      el(PerPageSelect, { value: props.perPage, onChange: props.onPerPageChange }),
+      el('div', { className: 'page-size-selector' },
+        el(PerPageSelect, { value: props.perPage, onChange: props.onPerPageChange }),
+      ),
       el(ColumnConfigDropdown, { visible: props.visibleColumns, onChange: props.onColumnsChange })
     );
   }
