@@ -401,27 +401,42 @@
     var totalItems = props.totalItems;
     var perPage = props.perPage;
 
-    if (totalPages <= 1) return null;
-
-    var items = [];
-    items.push(el(Pagination.First, { key: 'first', onClick: function () { onPageChange(1); }, disabled: currentPage === 1 }));
-    items.push(el(Pagination.Prev, { key: 'prev', onClick: function () { onPageChange(currentPage - 1); }, disabled: currentPage === 1 }));
-
-    // Show current page indicator
-    items.push(el(Pagination.Item, { key: 'current', active: true }, currentPage + ' of ' + totalPages));
-
-    items.push(el(Pagination.Next, { key: 'next', onClick: function () { onPageChange(currentPage + 1); }, disabled: currentPage === totalPages }));
-    items.push(el(Pagination.Last, { key: 'last', onClick: function () { onPageChange(totalPages); }, disabled: currentPage === totalPages }));
+    if (totalPages <= 1 && !totalItems) return null;
 
     var countText = null;
     if (totalItems != null) {
-      var start = (currentPage - 1) * perPage + 1;
+      var start = totalItems === 0 ? 0 : (currentPage - 1) * perPage + 1;
       var end = Math.min(currentPage * perPage, totalItems);
-      countText = el('span', { className: 'tm-pagination-count' }, start + '-' + end + ' of ' + totalItems);
+      countText = el('span', { className: 'filter-container text-muted paginationIndex center-text' },
+        start + '-' + end + ' of ' + totalItems
+      );
+    }
+
+    if (totalPages <= 1) {
+      return el('div', { className: 'pagination-index-container' }, countText);
+    }
+
+    function navBtn(label, page, disabled) {
+      return el(Button, {
+        key: label,
+        variant: 'secondary',
+        disabled: disabled,
+        onClick: function () { onPageChange(page); },
+      }, label);
     }
 
     return el('div', { className: 'pagination-index-container' },
-      el(Pagination, { className: 'pagination btn-group' }, items),
+      el('div', { className: 'pagination btn-group' },
+        navBtn('\u00ab', 1, currentPage === 1),
+        navBtn('\u2039', currentPage - 1, currentPage === 1),
+        el('div', { key: 'count', className: 'page-count-container' },
+          el('div', { className: 'btn-group' },
+            el(Button, { variant: 'secondary' }, currentPage + ' of ' + totalPages)
+          )
+        ),
+        navBtn('\u203a', currentPage + 1, currentPage === totalPages),
+        navBtn('\u00bb', totalPages, currentPage === totalPages)
+      ),
       countText
     );
   }
