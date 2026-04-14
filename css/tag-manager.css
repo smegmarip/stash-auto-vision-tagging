@@ -89,9 +89,13 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  align-self: center;
+  align-self: end;
   white-space: nowrap;
   font-size: 0.85rem;
+}
+
+.tm-taxonomy-options .btn-group label {
+  padding: 0.6rem 1rem;
 }
 
 /* --- Pills (confirmation modal, filter selections) --- */
@@ -114,9 +118,9 @@
   max-height: 250px;
   max-width: 500px;
   overflow-y: auto;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  background: rgba(0,0,0,0.1);
+  background: rgba(0, 0, 0, 0.1);
 }
 .tm-tag-control-search {
   position: sticky;
@@ -135,7 +139,7 @@
   padding: 0.15rem 0.35rem;
 }
 .tm-tag-row:hover {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
 }
 .tm-tag-row .tm-tag-name {
   flex: 1;
@@ -165,9 +169,9 @@
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.5rem;
-  border: 1px solid rgba(255,255,255,0.15);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
-  background: rgba(0,100,200,0.1);
+  background: rgba(0, 100, 200, 0.1);
 }
 .tm-batch-bar .tm-batch-count {
   font-weight: 600;

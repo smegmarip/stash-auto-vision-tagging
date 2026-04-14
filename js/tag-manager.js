@@ -54,6 +54,7 @@
   var Button = Bootstrap.Button;
   var Table = Bootstrap.Table;
   var Badge = Bootstrap.Badge;
+  var ButtonGroup = Bootstrap.ButtonGroup;
   var Modal = Bootstrap.Modal;
   var Form = Bootstrap.Form;
   var Dropdown = Bootstrap.Dropdown;
@@ -61,6 +62,8 @@
   var Pagination = Bootstrap.Pagination;
   var OverlayTrigger = Bootstrap.OverlayTrigger;
   var Tooltip = Bootstrap.Tooltip;
+  var ToggleButton = Bootstrap.ToggleButton;
+  var ToggleButtonGroup = Bootstrap.ToggleButtonGroup;
 
   var NavLink = api.libraries.ReactRouterDOM.NavLink;
   var Link = api.libraries.ReactRouterDOM.Link;
@@ -322,6 +325,18 @@
     // Exclude IDs from the other picker to prevent selecting a tag in both
     var excludeFromInclude = useMemo(function () { return taxExcludeIds; }, [taxExcludeIds]);
     var excludeFromExclude = useMemo(function () { return taxIncludeIds; }, [taxIncludeIds]);
+    var initialTaxonomyOptions = [...(includeSubTags ? ['sub-tags'] : []),...(groupByMembership ? ['group-membership'] : [])];
+    var onTaxonomyOptionChange = function (options, e) { 
+      var targetValue = e.target.value;
+      switch (targetValue) {
+        case 'sub-tags':
+          onIncludeSubTagsChange(e.target.checked);
+          break;
+        case 'group-membership':
+          onGroupByMembershipChange(e.target.checked);
+          break;
+      }
+     };
 
     return el('div', { className: 'tm-taxonomy' },
       el('div', { className: 'tm-taxonomy-bar' },
@@ -344,20 +359,35 @@
           })
         ),
         el('div', { className: 'tm-taxonomy-options' },
-          el(Form.Check, {
-            type: 'checkbox',
-            label: 'Sub-tags',
-            checked: includeSubTags,
-            onChange: function (e) { onIncludeSubTagsChange(e.target.checked); },
-            id: 'tm-include-sub-tags',
-          }),
-          el(Form.Check, {
-            type: 'checkbox',
-            label: 'Group',
-            checked: groupByMembership,
-            onChange: function (e) { onGroupByMembershipChange(e.target.checked); },
-            id: 'tm-group-membership',
-          })
+          el(ToggleButtonGroup, {
+              'aria-label': 'Taxonomy Filter Options',
+              type: 'checkbox',
+              defaultValue: initialTaxonomyOptions,
+              onChange: onTaxonomyOptionChange,
+            },
+            el(ToggleButton, {
+                'aria-label': 'Include Sub-Tags',
+                title: 'Include Sub-Tags',
+                type: 'checkbox',
+                variant: 'secondary',
+                checked: includeSubTags,
+                value: 'sub-tags',
+                id: 'tm-include-sub-tags',
+              }, 
+              el(api.components.Icon, { icon: FA.faSitemap })
+            ),
+            el(ToggleButton, {
+                'aria-label': 'Group by Membership',
+                title: 'Group by Membership',
+                type: 'checkbox',
+                variant: 'secondary',
+                checked: groupByMembership,
+                value: 'group-membership',
+                id: 'tm-group-membership',
+              }, 
+              el(api.components.Icon, { icon: FA.faLayerGroup })
+            ),
+          )
         )
       )
     );
