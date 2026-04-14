@@ -551,13 +551,12 @@
       props.onFilterTagExcludeChange([]);
       props.onFilterTagDepthChange(0);
       props.onFilterPathChange('');
-      props.onFilterPathModifierChange('INCLUDES');
       props.onFilterOrganizedChange(null);
     }
 
     function clearSection(key) {
       if (key === 'tags') { props.onFilterTagIncludeChange([]); props.onFilterTagExcludeChange([]); props.onFilterTagDepthChange(0); }
-      if (key === 'path') { props.onFilterPathChange(''); props.onFilterPathModifierChange('INCLUDES'); }
+      if (key === 'path') { props.onFilterPathChange(''); props.onFilterPathModifierChange(GQL.CriterionModifier.Includes); }
       if (key === 'organized') { props.onFilterOrganizedChange(null); }
     }
 
@@ -623,21 +622,31 @@
             ),
             filterCard('path', 'Path', !!props.filterPath,
               el('div', null,
-                el('div', { className: 'd-flex align-items-center mb-2', style: { gap: '0.5rem' } },
-                  el(Form.Control, {
-                    as: 'select', className: 'btn-secondary', value: props.filterPathModifier,
-                    onChange: function (e) { props.onFilterPathModifierChange(e.target.value); },
-                    style: { width: 'auto' },
-                  },
-                    el('option', { value: 'INCLUDES' }, 'Contains'),
-                    el('option', { value: 'MATCHES_REGEX' }, 'Matches Regex')
-                  )
+                el(Form.Group, { className: 'modifier-options' },
+                  [GQL.CriterionModifier.Includes, GQL.CriterionModifier.MatchesRegex].map(function (m) {
+                    var label = m === GQL.CriterionModifier.Includes ? 'includes' : 'matches regex';
+                    return el(Button, {
+                      key: m,
+                      className: 'modifier-option' + (props.filterPathModifier === m ? ' selected' : ''),
+                      onClick: function () { props.onFilterPathModifierChange(m); },
+                    }, label);
+                  })
                 ),
-                el(Form.Control, {
-                  className: 'clearable-text-field', placeholder: 'File path\u2026',
-                  value: props.filterPath,
-                  onChange: function (e) { props.onFilterPathChange(e.target.value); },
-                })
+                props.filterPathModifier === GQL.CriterionModifier.MatchesRegex
+                  ? el(Form.Control, {
+                      className: 'btn-secondary',
+                      placeholder: 'File path\u2026',
+                      value: props.filterPath,
+                      onChange: function (e) { props.onFilterPathChange(e.target.value); },
+                    })
+                  : el(api.components.FolderSelect, {
+                      currentDirectory: props.filterPath,
+                      onChangeDirectory: props.onFilterPathChange,
+                      defaultDirectories: props.libraryPaths,
+                      collapsible: true,
+                      quotePath: true,
+                      hideError: true,
+                    })
               )
             ),
             filterCard('organized', 'Organized', props.filterOrganized !== null,
@@ -860,6 +869,13 @@
     // --- All tags (for taxonomy + filter controls) ---
     var allTags = useAllTags();
 
+    // --- Library paths (for FolderSelect defaultDirectories) ---
+    var configResult = GQL.useConfigurationQuery();
+    var libraryPaths = useMemo(function () {
+      var stashes = configResult.data && configResult.data.configuration && configResult.data.configuration.general.stashes;
+      return stashes ? stashes.map(function (s) { return s.path; }) : [];
+    }, [configResult.data]);
+
     // --- Taxonomy state (client-side color coding) ---
     var taxIncLS = useLocalStorage('taxIncludeIds', []);
     var taxIncludeIds = taxIncLS[0]; var setTaxIncludeIds = taxIncLS[1];
@@ -893,7 +909,7 @@
     var filterPathState = useState('');
     var filterPath = filterPathState[0]; var setFilterPath = filterPathState[1];
 
-    var filterPathModState = useState('INCLUDES');
+    var filterPathModState = useState(GQL.CriterionModifier.Includes);
     var filterPathModifier = filterPathModState[0]; var setFilterPathModifier = filterPathModState[1];
 
     var filterOrgState = useState(null);
@@ -918,7 +934,7 @@
         hasFilter = true;
       }
       if (filterPath) {
-        f.path = { value: filterPath, modifier: GQL.CriterionModifier[filterPathModifier] || GQL.CriterionModifier.Includes };
+        f.path = { value: filterPath, modifier: filterPathModifier };
         hasFilter = true;
       }
       if (filterOrganized !== null) {
@@ -1073,16 +1089,17 @@
       el(EditFilterModal, {
         show: filterOpen,
         allTags: allTags,
+        libraryPaths: libraryPaths,
         filterTagIncludeIds: filterTagIncludeIds,
         filterTagExcludeIds: filterTagExcludeIds,
         filterTagDepth: filterTagDepth,
         filterPath: filterPath,
-        filterPathModifier: filterPathModifier,
         filterOrganized: filterOrganized,
         onFilterTagIncludeChange: setFilterTagIncludeIds,
         onFilterTagExcludeChange: setFilterTagExcludeIds,
         onFilterTagDepthChange: setFilterTagDepth,
         onFilterPathChange: setFilterPath,
+        filterPathModifier: filterPathModifier,
         onFilterPathModifierChange: setFilterPathModifier,
         onFilterOrganizedChange: setFilterOrganized,
         onClose: function () { setFilterOpen(false); },
