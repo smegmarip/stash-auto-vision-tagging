@@ -102,7 +102,8 @@ Two request shapes. **The embedded `SemanticsParameters` struct is identical in 
     "model_variant": "vision",
     "min_confidence": 0.75,
     "top_k_tags": 30,
-    "frame_selection": "sprite_sheet"
+    "frame_selection": "sprite_sheet",
+    "operations": ["tags"]
   }
 }
 ```
@@ -119,10 +120,13 @@ Two request shapes. **The embedded `SemanticsParameters` struct is identical in 
     "objects":  {"enabled": false},
     "semantics": {
       "enabled": true,
-      "parameters": { "model_variant": "vision", "min_confidence": 0.75, "top_k_tags": 30, "frame_selection": "sprite_sheet" }
+      "parameters": { "model_variant": "vision", "min_confidence": 0.75, "top_k_tags": 30, "frame_selection": "sprite_sheet", "operations": ["tags"] }
     }
   }
 }
+```
+
+The `operations` array is optional. When omitted (null), the service runs all operations (tags + summary + title). When set to a subset like `["tags"]` or `["summary", "title"]`, only those pipeline stages run. Valid values: `tags`, `summary`, `title`, `all`. The plugin resolves this from the per-task `operations` arg (set by the JS menu items or the batch enqueue loop), falling back to the `semanticsOperations` plugin setting.
 ```
 
 Both endpoints return HTTP 200/202 with the same `AnalyzeResponse` shape:
@@ -259,6 +263,9 @@ settings:
   pollIntervalSeconds:       { displayName: Poll Interval (s),          type: NUMBER,  description: "Integer seconds. Default: 2" }
   jobTimeoutSeconds:         { displayName: Job Timeout (s),            type: NUMBER,  description: "Integer seconds. Default: 1800" }
 
+  # --- Pipeline operations ---
+  semanticsOperations:           { displayName: Semantics Operations,       type: STRING,  description: "CSV of operations: tags, summary, title, or all. Blank or 'all' → full pipeline. Per-operation dropdown items override this for single-scene runs." }
+
   # --- Default classification parameters (floats as STRING because Stash NUMBER is integer-only) ---
   useVisionModel:                { displayName: Use Vision Model,                  type: BOOLEAN, description: "OFF → service default (model_variant=text-only). ON → explicitly send model_variant=vision." }
   minConfidence:                 { displayName: Minimum Confidence,                type: STRING,  description: "Decimal string 0.0–1.0 (e.g. 0.75). Blank → service default (0.75)." }
@@ -308,18 +315,21 @@ As a result there are no `useHierarchicalDecoding`, `selectSharpest`, `useQuanti
 
 ### 4.1 Single-scene flow ("Tag Scene" task)
 
-Triggered by the toolbar button in JS or by a manual task run with `mode=tag`.
+Triggered by the toolbar button, a per-operation dropdown item, or a manual task run with `mode=tag`.
 
 JS layer (`js/auto-vision-tagging.js`):
-1. Read scene from Stash via `findScene` (id, title, files[0].path, paths.{sprite,vtt}, tags{id}).
-2. `runPluginTask("Tag Scene", argsMap = { mode, scene_id, video_path, sprite_vtt, sprite_image, existing_tag_ids, ...settings})`.
+1. Two entry points, both calling the shared `runSceneJob(sceneId, operations, label)`:
+    - **Toolbar button** (tag icon, injected via `injectButton`) — passes `operations=null` → full pipeline.
+    - **Operations dropdown items** — the `hookOperationsDropdown(toolbar)` function attaches a click listener to the `[title="Operations"]` dropdown toggle. Each time the dropdown opens, `injectOperationsMenuItems` appends a divider + three `<a class="dropdown-item">` entries: *Auto-tag: Tags*, *Auto-tag: Summary*, *Auto-tag: Title*. Each passes a specific `operations` value (`"tags"`, `"summary"`, `"title"`) to `runSceneJob`.
+2. `runSceneJob` calls `runPluginTask("Tag Scene", [mode, scene_id, video_path, operations?])`. The `operations` arg is only included when non-null.
 3. `awaitJobFinished(jobId, onProgress)` polling `findJob` on a 500 ms cadence; pipe progress into the toolbar button overlay.
 4. After RPC job finishes, `pollLogsForMessage("[Plugin / Auto Vision Tagging] tagResult=")` to read the structured outcome.
 5. Refresh Apollo cache and toast a result.
 
 Go RPC layer (`gorpc/main.go`, mode `tag`):
 1. Validate args and settings; require `rollupApiUrl` and `semanticsApiUrl` to parse cleanly with explicit ports. `resolveAPIHosts()` reads the `useSemanticsApiAsPrimary` boolean to pick which host is primary and returns `primary, fallback *apiHost` — both typed with their API kind so the dispatcher can build the right path and body.
-2. Submit. Try the primary host's `/analyze` endpoint with its native request shape (`AnalyzeSemanticsRequest` for semantics, `VisionAnalyzeRequest` for rollup). On any error, fall over to the fallback host with the fallback's shape and log `fallbackEngaged=submit`. The host that accepts the submission becomes the starting point for reads.
+2. Resolve operations: `input.Args.String("operations")` (set by the JS menu items or the batch enqueue loop) takes precedence, falling back to the `semanticsOperations` plugin setting. The CSV is validated against `{tags, summary, title, all}` via `parseOperations`; `"all"` or empty → nil → the `operations` field is omitted from the request and the service runs all stages.
+3. Submit. Try the primary host's `/analyze` endpoint with its native request shape (`AnalyzeSemanticsRequest` for semantics, `VisionAnalyzeRequest` for rollup), including the resolved `operations` in the parameters. On any error, fall over to the fallback host with the fallback's shape and log `fallbackEngaged=submit`. The host that accepts the submission becomes the starting point for reads.
 3. Poll status on the pinned host (the one that accepted the submit). URL path comes from the pinned host's own template — `/vision/jobs/{id}/status` for rollup, `/semantics/jobs/{id}/status` for semantics — so the namespace always matches. Transient poll errors are logged and retried on the same host. Surface progress via `log.Progress(...)`. Bail on `failed`/`cancelled` or after `jobTimeoutSeconds`. **No cross-host fallover for reads.**
 4. On `completed`, fetch results from the pinned host using the same template (`/vision/jobs/{id}/results` or `/semantics/jobs/{id}/results`). If the response is non-2xx, unparsable, or has `semantics: null`, the task fails and the user retries.
 5. Read `semantics.tags[]` from whichever response succeeded.
@@ -340,14 +350,14 @@ Go RPC layer (`gorpc/main.go`, mode `tag`):
 
 Mode `tagBatch`. One-scene-at-a-time, mirroring `stash-decensor`'s `decensorBatch`:
 
-1. Load plugin config; resolve `batchTagId`, `autoTaggedTagId`, `maxBatchSize`.
+1. Load plugin config; resolve `batchTagId`, `autoTaggedTagId`, `maxBatchSize`, `semanticsOperations`.
 2. **Require `autoTaggedTagId` to be set.** If it is empty, log an info-level message ("Batch mode requires the Auto-tagged Tag ID setting to be configured — exiting without doing any work.") and return success. The batch flow has no other reliable way to know which scenes are already done, so without that marker it would either reprocess every scene on every run or have to keep state somewhere else. Single-scene mode is unaffected and still works without `autoTaggedTagId` (it always reprocesses).
 3. Find candidate scenes:
     - **If `batchTagId` is set:** `findScenes(scene_filter: { tags: { value: [batchTagId], modifier: INCLUDES, depth: -1 } })`.
     - **If `batchTagId` is empty:** `findScenes(scene_filter: { tags: { value: [autoTaggedTagId], modifier: EXCLUDES, depth: -1 } })`.
 4. Filter out any remaining scenes that already carry `autoTaggedTagId` (defensive — the GraphQL EXCLUDES filter should already handle this, but the include-by-batchTagId path might still match already-tagged scenes).
 5. Cap to `maxBatchSize`.
-6. For each remaining scene, `runPluginTask("Tag Scene", argsMap)` to enqueue a single-scene job. The argsMap includes a `from_batch: "1"` marker so the downstream `tagScene` run knows this scene was queued from batch mode. Stash's worker queue serializes these so we get one-at-a-time processing for free.
+6. For each remaining scene, `runPluginTask("Tag Scene", argsMap)` to enqueue a single-scene job. The argsMap includes a `from_batch: "1"` marker so the downstream `tagScene` run knows this scene was queued from batch mode, and an `operations` value forwarded from the `semanticsOperations` setting so each scene runs only the configured pipeline stages. Stash's worker queue serializes these so we get one-at-a-time processing for free.
 7. **Do not sleep in the batch enqueue loop.** The batch task itself occupies Stash's single worker slot for its entire lifetime, so sleeping between enqueues only delays *queueing*, not actual scene processing — all the per-scene Tag Scene tasks we enqueued are waiting behind the batch task in the worker queue and cannot run until the batch task returns. The real cooldown lives at the end of `tagScene` (§4.1).
 
 The batch task itself returns once all scenes are queued; individual progress lives in the per-scene job status.

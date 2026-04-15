@@ -64,6 +64,12 @@ settings:
     description: "Hard ceiling on a single job before giving up. Default: 1800"
     type: NUMBER
 
+  # --- Pipeline operations ---
+  semanticsOperations:
+    displayName: Semantics Operations
+    description: "Comma-separated list of operations to run: tags, summary, title, or all. Leave blank or set to 'all' to run the full pipeline. The front-end per-operation menu items override this for single-scene runs. Default: all"
+    type: STRING
+
   # --- Default classification parameters (overrides per-scene values that do not change with the scene) ---
   useVisionModel:
     displayName: Use Vision Model

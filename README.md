@@ -8,8 +8,9 @@ Hybrid **Go RPC + JavaScript** plugin, structurally modelled on `stash-decensor`
 
 ### Classification
 
-- **Per-scene toolbar button** — click the tag icon on any scene page to classify that scene. A progress overlay tracks the running job and a toast reports the result.
-- **Batch mode** — queues every eligible scene for classification, one at a time, through Stash's worker queue. A configurable cooldown runs between scenes to throttle the GPU.
+- **Per-scene toolbar button** — click the tag icon on any scene page to run the full classification pipeline. A progress overlay tracks the running job and a toast reports the result.
+- **Per-operation menu items** — the scene toolbar's three-dot **Operations** dropdown gains three additional entries: **Auto-tag: Tags**, **Auto-tag: Summary**, and **Auto-tag: Title**. Each runs only that specific pipeline stage, so you can regenerate a title without re-running the full classifier.
+- **Batch mode** — queues every eligible scene for classification, one at a time, through Stash's worker queue. A configurable cooldown runs between scenes to throttle the GPU. The `Semantics Operations` setting controls which pipeline stages run during a batch.
 - **Scene.Create.Post hook** — optionally auto-tags newly scanned scenes, skipping scenes that are already marked as classified.
 - **Dual-host routing** — supports two independent auto-vision API hosts (Vision Rollup and Semantics Service) with automatic submit-time fallover. The host that accepts the submit is pinned for all subsequent status and results reads.
 - **Flat + recursive tag exclusion** — drop unwanted classifier tags by ID, or by an ancestor whose entire subtree should be excluded. Exclusion applies to both the classifier's output _and_ any matching tags already on the scene, so a scene is always left in a state consistent with the current exclusion list.
@@ -85,9 +86,12 @@ The plugin ships with a precompiled `gorpc/stash-auto-vision-tagging-rpc` binary
 
 ### Single-scene classification
 
-Open any scene in Stash and click the tag icon in the scene toolbar. The button shows a live progress percentage while the job runs. When it finishes, a toast reports how many tags were applied.
+Open any scene in Stash. You have two entry points:
 
-You can also run **Settings → Tasks → Auto Vision Tagging → Tag Scene** if you prefer the task panel.
+- **Toolbar button** (tag icon) — runs the full pipeline (tags + summary + title). A progress overlay tracks the running job and a toast reports the result.
+- **Operations dropdown** (three-dot menu) — scroll past the built-in Stash items (Rescan, Generate, etc.) to find **Auto-tag: Tags**, **Auto-tag: Summary**, and **Auto-tag: Title**. Each runs only that specific pipeline stage, which is faster when you only need to regenerate one output.
+
+You can also run **Settings → Tasks → Auto Vision Tagging → Tag Scene** from the task panel; that uses the `Semantics Operations` setting to decide which stages to run.
 
 Single-scene runs **always reprocess** — even if the scene already carries the auto-tagged marker — because manually invoking the action is treated as an explicit user request to reclassify (e.g. after a model update or a parameter change).
 
@@ -118,6 +122,7 @@ The plugin manifest (`auto-vision-tagging.yml`) and the plugin's Settings panel 
 - **Float-valued settings use STRING type.** Stash's `NUMBER` type is integer-only, so `Minimum Confidence` and `Minimum Frame Quality` are declared as STRING — enter decimal strings like `0.75`.
 - **Boolean settings default to `false`.** A Stash boolean toggle that has never been touched is indistinguishable in the UI from one explicitly set to false, so every boolean in the manifest is an explicit opt-in or opt-out of the non-default behavior. Setting names like `disableHierarchicalDecoding` (opt-out) and `useVisionModel` / `replaceExistingTags` (opt-in) make the direction explicit.
 - **Interval-based frame selection is not supported.** Only `sprite_sheet` (default) and `scene_based` are exposed.
+- **`Semantics Operations`** (STRING) — comma-separated list of pipeline operations to run: `tags`, `summary`, `title`, or `all`. Leave blank or set to `all` to run the full pipeline. This is the default for batch mode and for task-panel runs; the per-operation dropdown menu items on the scene page override it for single-scene runs.
 - **`Merge Summary When Details Empty`** (opt-in) — when ON, the plugin will write the classifier's `scene_summary` into the scene's `details` field on the same `sceneUpdate` call that writes tags, but only for scenes whose `details` field is currently empty or whitespace. Non-empty details are always preserved. When OFF (default), the plugin never touches the `details` field.
 - **`Merge Title When Scene Title Empty`** (opt-in) — symmetric to the summary setting. When ON, the plugin writes the classifier's LLM-generated `suggested_title` into the scene's `title` field on the same `sceneUpdate` call, but only for scenes whose `title` is currently empty. Non-empty titles are always preserved. When OFF (default), the plugin never touches the `title` field.
 
@@ -142,6 +147,7 @@ The Go RPC binary emits a few structured log lines that the JS layer consumes an
 | Prefix                                                                   | Meaning                                                                                                                                                                                     |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tagResult={…}`                                                          | Per-scene JSON outcome — scene_id, job_id, policy, list of applied tag ids, count of excluded tags.                                                                                         |
+| `Submitting scene X (...) via primary=... operations=[...]`              | Shows which API host is being used and which pipeline operations were requested (`tags`, `summary`, `title`, or `all`).                                                                     |
 | `fallbackEngaged=submit`                                                 | The primary submit host failed and the plugin successfully fell over to the fallback host. All subsequent reads for this task use the fallback host.                                        |
 | `Exclusion: flat=[…] recursive=[…]`                                      | The exclusion settings as read at the start of the task. Useful to confirm the plugin actually saw the IDs you configured.                                                                  |
 | `Exclusion: parent <id> → N descendants`                                 | For each `excludedTagIdsRecursive` entry, the number of descendant tags found via Stash's tag hierarchy.                                                                                    |

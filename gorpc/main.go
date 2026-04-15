@@ -141,6 +141,7 @@ type SemanticsParameters struct {
 	MinFrameQuality              *float64 `json:"min_frame_quality,omitempty"`
 	UseQuantization              *bool    `json:"use_quantization,omitempty"`
 	GenerateEmbeddings           *bool    `json:"generate_embeddings,omitempty"`
+	Operations                   []string `json:"operations,omitempty"`
 }
 
 // AnalyzeSemanticsRequest is the POST body for /semantics/analyze
@@ -335,9 +336,24 @@ func (a *autoVisionPlugin) tagScene(input common.PluginInput) (string, error) {
 	}
 
 	videoPath := scene.Files[0].Path
-	params := a.buildSemanticsParameters(scene)
 
-	log.Infof("Submitting scene %s (%s) via primary=%s", sceneID, videoPath, primary.Kind)
+	// Resolve operations: per-task arg takes precedence (set by the JS
+	// menu items or the batch enqueue loop), falling back to the plugin
+	// setting semanticsOperations (CSV). "all" or empty → nil → service
+	// runs all operations.
+	opsCSV := input.Args.String("operations")
+	if opsCSV == "" {
+		opsCSV = getStringSetting(a.config, "semanticsOperations", "")
+	}
+	ops := parseOperations(opsCSV)
+
+	params := a.buildSemanticsParameters(scene, ops)
+
+	opsLabel := "all"
+	if ops != nil {
+		opsLabel = strings.Join(ops, ",")
+	}
+	log.Infof("Submitting scene %s (%s) via primary=%s operations=[%s]", sceneID, videoPath, primary.Kind, opsLabel)
 
 	jobID, activeHost, err := a.submitJobWithFallback(primary, fallback, sceneID, videoPath, params)
 	if err != nil {
@@ -434,6 +450,7 @@ func (a *autoVisionPlugin) tagBatch(input common.PluginInput) (string, error) {
 	batchTagID := getStringSetting(a.config, "batchTagId", "")
 	maxBatchSize := getIntSetting(a.config, "maxBatchSize", 50)
 	cooldownSeconds := getIntSetting(a.config, "cooldownSeconds", 5)
+	operationsCSV := getStringSetting(a.config, "semanticsOperations", "")
 
 	log.Infof("Starting batch: batchTagId=%q autoTaggedTagId=%s maxBatchSize=%d", batchTagID, autoTaggedTagID, maxBatchSize)
 
@@ -481,7 +498,7 @@ func (a *autoVisionPlugin) tagBatch(input common.PluginInput) (string, error) {
 			log.Info("Batch interrupted by Stop signal")
 			break
 		}
-		if err := a.queueTagScene(string(s.ID), s.Files[0].Path, true); err != nil {
+		if err := a.queueTagScene(string(s.ID), s.Files[0].Path, true, operationsCSV); err != nil {
 			log.Errorf("Failed to queue scene %s: %v", string(s.ID), err)
 			failed++
 			continue
@@ -518,7 +535,7 @@ func (a *autoVisionPlugin) tagOnCreate(input common.PluginInput) (string, error)
 		}
 	}
 
-	if err := a.queueTagScene(sceneID, "", false); err != nil {
+	if err := a.queueTagScene(sceneID, "", false, ""); err != nil {
 		return "", fmt.Errorf("hook: failed to queue Tag Scene task: %w", err)
 	}
 	return fmt.Sprintf("hook: queued Tag Scene for scene %s", sceneID), nil
@@ -842,8 +859,10 @@ func fetchResultsAt(client *http.Client, endpoint string) (*JobResultsResponse, 
 //     forced by a Stash quirk where a boolean toggle that's never been touched
 //     is indistinguishable in the UI from one that was explicitly set to false,
 //     so the plugin cannot meaningfully default a boolean to true.
-func (a *autoVisionPlugin) buildSemanticsParameters(scene *sceneInfo) SemanticsParameters {
-	p := SemanticsParameters{}
+func (a *autoVisionPlugin) buildSemanticsParameters(scene *sceneInfo, operations []string) SemanticsParameters {
+	p := SemanticsParameters{
+		Operations: operations, // nil = omitted via omitempty = service runs all
+	}
 
 	// Opt-in enum booleans: false (default) → omit the field so the service
 	// applies its own default. true → explicitly send the alternative value.
@@ -1386,8 +1405,10 @@ func (a *autoVisionPlugin) updateScene(sceneID string, tagIDs []string, details,
 // queueTagScene enqueues a Tag Scene task via runPluginTask. The fromBatch
 // flag is forwarded as an arg so tagScene knows to apply the cooldown at the
 // end of its run. Single-scene manual runs and hook invocations pass
-// fromBatch=false; the batch enqueue loop passes true.
-func (a *autoVisionPlugin) queueTagScene(sceneID, videoPath string, fromBatch bool) error {
+// fromBatch=false; the batch enqueue loop passes true. The operations string
+// (CSV of SemanticsOperation values) is forwarded so the per-scene task can
+// restrict the pipeline to a subset of operations.
+func (a *autoVisionPlugin) queueTagScene(sceneID, videoPath string, fromBatch bool, operations string) error {
 	ctx := context.Background()
 
 	var mutation struct {
@@ -1404,6 +1425,9 @@ func (a *autoVisionPlugin) queueTagScene(sceneID, videoPath string, fromBatch bo
 	if fromBatch {
 		(*args)["from_batch"] = "1"
 	}
+	if operations != "" {
+		(*args)["operations"] = operations
+	}
 
 	desc := fmt.Sprintf("Auto-vision tagging scene %s", sceneID)
 	vars := map[string]interface{}{
@@ -1418,6 +1442,26 @@ func (a *autoVisionPlugin) queueTagScene(sceneID, videoPath string, fromBatch bo
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+// parseOperations validates a CSV of SemanticsOperation values against the
+// known enum and returns only the matching entries. "all" or empty input
+// returns nil, which causes the Operations field to be omitted via omitempty
+// so the service runs all operations.
+func parseOperations(csv string) []string {
+	valid := map[string]bool{"title": true, "summary": true, "tags": true, "all": true}
+	parts := splitCSV(csv)
+	var ops []string
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if valid[p] {
+			ops = append(ops, p)
+		}
+	}
+	if len(ops) == 0 || containsString(ops, "all") {
+		return nil
+	}
+	return ops
+}
 
 func getStringSetting(cfg PluginConfig, key, def string) string {
 	if v, ok := cfg[key]; ok {
