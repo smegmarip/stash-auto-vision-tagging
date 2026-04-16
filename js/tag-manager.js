@@ -33,7 +33,7 @@
     { value: 'tag_count',  label: 'Tag Count' },
   ];
 
-  var PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500];
+  var PER_PAGE_OPTIONS = [20, 40, 60, 120, 250, 500, 1000];
 
   // =========================================================================
   // API references
@@ -69,6 +69,7 @@
   var Link = api.libraries.ReactRouterDOM.Link;
 
   var FA = api.libraries.FontAwesomeSolid;
+  var { faEye } = api.libraries.FontAwesomeRegular;
 
   // =========================================================================
   // Utilities
@@ -316,6 +317,8 @@
     var onIncludeSubTagsChange = props.onIncludeSubTagsChange;
     var groupByMembership = props.groupByMembership;
     var onGroupByMembershipChange = props.onGroupByMembershipChange;
+    var previewEnabled = props.previewEnabled;
+    var onPreviewToggle = props.onPreviewToggle;
 
     var TagSelect = api.components.TagSelect;
 
@@ -373,7 +376,7 @@
                 checked: includeSubTags,
                 value: 'sub-tags',
                 id: 'tm-include-sub-tags',
-              }, 
+              },
               el(api.components.Icon, { icon: FA.faSitemap })
             ),
             el(ToggleButton, {
@@ -384,10 +387,14 @@
                 checked: groupByMembership,
                 value: 'group-membership',
                 id: 'tm-group-membership',
-              }, 
+              },
               el(api.components.Icon, { icon: FA.faLayerGroup })
             ),
-          )
+          ),
+          el(PreviewSwitch, {
+            enabled: previewEnabled,
+            onToggle: onPreviewToggle,
+          })
         )
       )
     );
@@ -417,6 +424,128 @@
       var cb = getTagColorClass(b.id, includeSet, excludeSet);
       return (order[ca] || 1) - (order[cb] || 1);
     });
+  }
+
+  // =========================================================================
+  // PreviewSwitch — toggle for sprite preview (duplicated from stash-scene-preview)
+  // =========================================================================
+
+  function PreviewSwitch(props) {
+    var Icon = api.components.Icon;
+
+    return el('div', { className: 'tm-preview-toggle', title: 'Sprite Preview' },
+      el(Icon, { icon: faEye }),
+      el('label', { className: 'switch' },
+        el('input', {
+          type: 'checkbox',
+          className: 'default',
+          checked: props.enabled,
+          onChange: function (e) { props.onToggle(e.target.checked); },
+        }),
+        el('span', { className: 'slider round' })
+      )
+    );
+  }
+
+  // =========================================================================
+  // SpritePreviewTooltip — fixed overlay showing sprite sheet on thumbnail hover
+  // =========================================================================
+
+  var spriteValidCache = {};
+
+  function SpritePreviewTooltip(props) {
+    var enabled = props.enabled;
+    var parentRef = props.tooltipRef;
+    var tooltipRef = useRef(null);
+    var imgRef = useRef(null);
+    var enabledRef = useRef(enabled);
+
+    // Sync the parent ref so SceneRow hover handlers can reach the DOM element
+    useEffect(function () {
+      if (parentRef) parentRef.current = tooltipRef.current;
+    });
+
+    useEffect(function () { enabledRef.current = enabled; }, [enabled]);
+
+    // Expose imperative show/hide via a stable ref on the DOM
+    useEffect(function () {
+      var tooltip = tooltipRef.current;
+      if (!tooltip) return;
+
+      tooltip._spriteShow = function (spriteUrl, anchorRect) {
+        if (!enabledRef.current) return;
+
+        var margin = 16;
+
+        // Already probed — show if valid, skip if failed
+        if (spriteUrl in spriteValidCache) {
+          if (spriteValidCache[spriteUrl]) {
+            displayTooltip(tooltip, spriteUrl, anchorRect, margin);
+          }
+          return;
+        }
+
+        // Validate with a probe image
+        var probe = new Image();
+        probe.onload = function () {
+          spriteValidCache[spriteUrl] = { w: probe.naturalWidth, h: probe.naturalHeight };
+          displayTooltip(tooltip, spriteUrl, anchorRect, margin);
+        };
+        probe.onerror = function () {
+          spriteValidCache[spriteUrl] = null;
+        };
+        probe.src = spriteUrl;
+      };
+
+      tooltip._spriteHide = function () {
+        tooltip.style.display = 'none';
+        if (imgRef.current) imgRef.current.src = '';
+      };
+    }, []);
+
+    return el('div', { className: 'tm-sprite-tooltip', ref: tooltipRef },
+      el('img', { ref: imgRef })
+    );
+  }
+
+  function displayTooltip(tooltip, spriteUrl, anchorRect, margin) {
+    var cached = spriteValidCache[spriteUrl];
+    if (!cached) { tooltip.style.display = 'none'; return; }
+
+    var img = tooltip.querySelector('img');
+    if (!img) return;
+    img.src = spriteUrl;
+
+    // Compute available space and constrained size
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var natW = cached.w;
+    var natH = cached.h;
+
+    // Available space to the right of the thumbnail (with margin from viewport edge)
+    var availW = vw - anchorRect.right - margin * 2;
+    var availH = vh - margin * 2;
+
+    // Scale to fit within available space while maintaining aspect ratio
+    var scale = Math.min(1, availW / natW, availH / natH);
+    var dispW = Math.round(natW * scale);
+    var dispH = Math.round(natH * scale);
+
+    img.style.width = dispW + 'px';
+    img.style.height = dispH + 'px';
+
+    // Position: to the right of the thumbnail, vertically centered on it
+    var left = anchorRect.right + margin;
+    var top = anchorRect.top + (anchorRect.height / 2) - (dispH / 2);
+
+    // Clamp to viewport
+    if (top < margin) top = margin;
+    if (top + dispH > vh - margin) top = vh - margin - dispH;
+    if (left + dispW > vw - margin) left = vw - margin - dispW;
+
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.style.display = 'block';
   }
 
   // =========================================================================
@@ -742,11 +871,30 @@
     var includeSet = props.includeSet;
     var excludeSet = props.excludeSet;
     var groupByMembership = props.groupByMembership;
+    var previewEnabled = props.previewEnabled;
+    var spriteTooltipRef = props.spriteTooltipRef;
 
     var show = function (key) { return visibleColumns.indexOf(key) >= 0; };
 
     var filePath = scene.files && scene.files[0] ? scene.files[0].path : '';
     var duration = scene.files && scene.files[0] ? scene.files[0].duration : 0;
+
+    var spriteUrl = scene.paths && scene.paths.sprite ? scene.paths.sprite : null;
+
+    var onCoverEnter = useCallback(function (e) {
+      if (!previewEnabled || !spriteUrl || !spriteTooltipRef.current) return;
+      var tooltip = spriteTooltipRef.current;
+      if (tooltip._spriteShow) {
+        var rect = e.currentTarget.getBoundingClientRect();
+        tooltip._spriteShow(spriteUrl, rect);
+      }
+    }, [previewEnabled, spriteUrl, spriteTooltipRef]);
+
+    var onCoverLeave = useCallback(function () {
+      if (!spriteTooltipRef.current) return;
+      var tooltip = spriteTooltipRef.current;
+      if (tooltip._spriteHide) tooltip._spriteHide();
+    }, [spriteTooltipRef]);
 
     var cells = [];
 
@@ -762,7 +910,12 @@
     ));
 
     // Cover
-    cells.push(el('td', { key: 'cover', className: 'cover_image-data' },
+    cells.push(el('td', {
+      key: 'cover',
+      className: 'cover_image-data',
+      onMouseEnter: onCoverEnter,
+      onMouseLeave: onCoverLeave,
+    },
       el(Link, { to: '/scenes/' + scene.id },
         scene.paths && scene.paths.screenshot
           ? el('img', { className: 'image-thumbnail', src: scene.paths.screenshot, loading: 'lazy' })
@@ -829,6 +982,8 @@
     var includeSet = props.includeSet;
     var excludeSet = props.excludeSet;
     var groupByMembership = props.groupByMembership;
+    var previewEnabled = props.previewEnabled;
+    var spriteTooltipRef = props.spriteTooltipRef;
 
     var show = function (key) { return visibleColumns.indexOf(key) >= 0; };
     var allSelected = scenes.length > 0 && scenes.every(function (s) { return selectedIds.has(s.id); });
@@ -860,6 +1015,8 @@
             includeSet: includeSet,
             excludeSet: excludeSet,
             groupByMembership: groupByMembership,
+            previewEnabled: previewEnabled,
+            spriteTooltipRef: spriteTooltipRef,
           });
         })
       )
@@ -918,6 +1075,11 @@
 
     var groupLS = useLocalStorage('groupByMembership', false);
     var groupByMembership = groupLS[0]; var setGroupByMembership = groupLS[1];
+
+    // --- Sprite preview ---
+    var previewLS = useLocalStorage('previewMode', false);
+    var previewEnabled = previewLS[0]; var setPreviewEnabled = previewLS[1];
+    var spriteTooltipRef = useRef(null);
 
     // Resolved taxonomy sets (expanded with descendants when recursion is on)
     var resolvedIncludeSet = useResolvedTagSet(taxIncludeIds, taxIncludeSubTags, allTags);
@@ -1154,6 +1316,8 @@
         onIncludeSubTagsChange: setTaxIncludeSubTags,
         groupByMembership: groupByMembership,
         onGroupByMembershipChange: setGroupByMembership,
+        previewEnabled: previewEnabled,
+        onPreviewToggle: setPreviewEnabled,
       }),
 
       // Batch action bar
@@ -1190,6 +1354,8 @@
                 includeSet: resolvedIncludeSet,
                 excludeSet: resolvedExcludeSet,
                 groupByMembership: groupByMembership,
+                previewEnabled: previewEnabled,
+                spriteTooltipRef: spriteTooltipRef,
               })
             ),
 
@@ -1231,7 +1397,10 @@
             disabled: bulkLoading,
           }, bulkLoading ? el(Spinner, { animation: 'border', size: 'sm' }) : 'Confirm')
         )
-      )
+      ),
+
+      // Sprite preview tooltip (rendered once, shown/hidden imperatively)
+      el(SpritePreviewTooltip, { enabled: previewEnabled, tooltipRef: spriteTooltipRef })
     );
   }
 

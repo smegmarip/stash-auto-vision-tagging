@@ -87,8 +87,9 @@
 }
 .tm-taxonomy-options {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
   align-self: end;
   white-space: nowrap;
   font-size: 0.85rem;
@@ -96,6 +97,96 @@
 
 .tm-taxonomy-options .btn-group label {
   padding: 0.6rem 1rem;
+}
+
+/* --- Preview switch (duplicated from stash-scene-preview, scoped to .tm-preview-toggle) --- */
+
+.tm-preview-toggle {
+  padding: 0.375rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background-color: #394b59;
+  border-color: #394b59;
+  border-radius: 4px;
+  box-sizing: border-box;
+  cursor: default;
+  align-self: stretch;
+}
+.tm-preview-toggle:hover {
+  background-color: #2a3742;
+  border-color: #25313a;
+}
+.tm-preview-toggle .fa-icon {
+  margin-left: 0;
+}
+.tm-preview-toggle .switch {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 14px;
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.tm-preview-toggle .switch input {
+  display: none;
+}
+.tm-preview-toggle .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #202b33;
+  transition: 0.4s;
+}
+.tm-preview-toggle .slider:before {
+  position: absolute;
+  content: "";
+  height: 10px;
+  width: 10px;
+  left: 4px;
+  bottom: 2px;
+  background-color: white;
+  transition: 0.4s;
+}
+.tm-preview-toggle:hover .slider {
+  background-color: #394b59;
+}
+.tm-preview-toggle input.default:checked + .slider {
+  background-color: #137cbd;
+}
+.tm-preview-toggle input:focus + .slider {
+  box-shadow: 0 0 1px #2196f3;
+}
+.tm-preview-toggle input:checked + .slider:before {
+  transform: translateX(13px);
+}
+.tm-preview-toggle .slider.round {
+  border-radius: 14px;
+}
+.tm-preview-toggle .slider.round:before {
+  border-radius: 50%;
+}
+
+/* --- Sprite preview tooltip --- */
+
+.tm-sprite-tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  display: none;
+  border: 1px solid #555;
+  background: #1a1a1a;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.tm-sprite-tooltip img {
+  display: block;
 }
 
 /* --- Pills (confirmation modal, filter selections) --- */

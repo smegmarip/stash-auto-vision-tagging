@@ -25,6 +25,7 @@ A dedicated page at `/plugins/tag-manager` (accessible via the tags icon in Stas
 - **Edit Filter** — modal dialog with accordion-style filter sections for Tags (include/exclude with sub-tag hierarchy), Path (contains or regex match), and Organized (tri-state). Filters apply live to the GraphQL query.
 - **Taxonomy color coding** — dual TagSelect typeahead bar for visually classifying tags across all visible scenes. Tags matching the "Include" set appear as green badges; "Exclude" as red; conflicts as amber; unmatched as gray. Optional "Include sub-tags" recursion and "Group by membership" sorting within each row.
 - **Batch tag operations** — select scenes via checkboxes, then "Remove excluded tags" or "Add included tags" (leaf tags only) with a confirmation modal. Uses `bulkSceneUpdate` for efficient multi-scene mutations.
+- **Sprite sheet preview** — toggle the eye switch in the taxonomy options bar to enable hover previews on scene thumbnails. Hovering a cover image displays the scene's sprite sheet in a floating overlay to the right of the thumbnail, sized to the lesser of the sprite's natural dimensions or the available viewport space.
 
 ## Architecture
 
