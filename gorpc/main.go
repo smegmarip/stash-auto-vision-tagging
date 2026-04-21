@@ -386,11 +386,24 @@ func (a *autoVisionPlugin) tagScene(input common.PluginInput) (string, error) {
 	}
 	log.Infof("Job %s returned %d tags", jobID, len(results.Semantics.Tags))
 
+	// Re-fetch the scene so applyTagsToScene sees the current tags, title,
+	// and details — not the snapshot from before the job ran. A classification
+	// job can take minutes; tags or metadata may have changed in the meantime
+	// (manual edits, other plugins, concurrent batch runs). Using the stale
+	// snapshot would silently overwrite those changes.
+	scene, err = a.findScene(sceneID)
+	if err != nil {
+		return "", fmt.Errorf("findScene (refresh) failed: %w", err)
+	}
+	if scene == nil {
+		return "", fmt.Errorf("scene %s was deleted during classification", sceneID)
+	}
+
 	suggestedTitle := ""
 	if results.Semantics.SuggestedTitle != nil {
 		suggestedTitle = *results.Semantics.SuggestedTitle
 	}
-	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags, results.Semantics.SceneSummary, suggestedTitle)
+	applied, skipped, policy, err := a.applyTagsToScene(scene, results.Semantics.Tags, results.Semantics.SceneSummary, suggestedTitle, ops)
 	if err != nil {
 		return "", err
 	}
@@ -926,107 +939,99 @@ func (a *autoVisionPlugin) buildSemanticsParameters(scene *sceneInfo, operations
 // Tag application
 // -----------------------------------------------------------------------------
 
-// applyTagsToScene filters the classifier output through the exclusion lists,
-// resolves the merge/replace policy, optionally stages the classifier's
-// scene_summary as a details write and suggested_title as a title write
-// (each independently gated on its own "WhenMissing" setting + an emptiness
-// check on the current scene state), and writes the scene via sceneUpdate.
-// Returns the IDs actually written, the number of classifier tags dropped
-// by exclusions, and the effective policy string (may be "merge" even when
-// the user selected "replace" if the empty-list safety net kicked in).
-func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag, summary, title string) ([]string, int, string, error) {
+// applyTagsToScene writes classifier results back to the scene, gated on the
+// operations that were actually requested. Each write is independently
+// conditioned: tags are only touched when ops includes "tags" (or is nil =
+// all operations), summary only when ops includes "summary", title only when
+// ops includes "title". When an operation wasn't requested, the corresponding
+// scene field passes through completely untouched — no reads, no writes, no
+// side-effects.
+func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierTag, summary, title string, ops []string) ([]string, int, string, error) {
+	writeTags := opsInclude(ops, "tags")
+	writeSummary := opsInclude(ops, "summary")
+	writeTitle := opsInclude(ops, "title")
+
 	autoTaggedTagID := getStringSetting(a.config, "autoTaggedTagId", "")
+	batchTagID := getStringSetting(a.config, "batchTagId", "")
 
-	excluded, err := a.buildExclusionSet()
-	if err != nil {
-		return nil, 0, "", fmt.Errorf("build exclusion set: %w", err)
-	}
-
-	keptIDs := make([]string, 0, len(tags))
-	seen := map[string]bool{}
-	skipped := 0
-	for _, t := range tags {
-		if t.TagID == "" {
-			continue
-		}
-		if excluded[t.TagID] {
-			skipped++
-			continue
-		}
-		if seen[t.TagID] {
-			continue
-		}
-		seen[t.TagID] = true
-		keptIDs = append(keptIDs, t.TagID)
-	}
-
-	policy := "merge"
-	if getBoolSetting(a.config, "replaceExistingTags", false) {
-		policy = "replace"
-	}
-
-	// Safety net: replace + empty kept list silently degrades to merge for
-	// this scene so we never wipe a scene's tags just because the classifier
-	// returned nothing usable after exclusion.
-	effectivePolicy := policy
-	if policy == "replace" && len(keptIDs) == 0 {
-		log.Warnf("Replace policy with empty post-exclusion tag list — falling back to merge for scene %s", string(scene.ID))
-		effectivePolicy = "merge"
-	}
-
+	// -- Tags ---------------------------------------------------------------
+	// Classifier tag exclusion/merge/replace only runs when the "tags"
+	// operation was requested. Otherwise existing scene tags pass through
+	// unchanged. Regardless of which operations ran, the two housekeeping
+	// tags are always applied at the end: autoTaggedTagId is added (marks
+	// the scene as processed) and batchTagId is removed (takes the scene
+	// out of the batch input pool).
 	var finalIDs []string
-	switch effectivePolicy {
-	case "replace":
-		// Replace wipes the scene's existing tags unconditionally, so the
-		// exclusion set only needs to be consulted on the classifier side
-		// (already done above when building keptIDs).
-		finalIDs = append(finalIDs, keptIDs...)
-		if autoTaggedTagID != "" && !containsString(finalIDs, autoTaggedTagID) {
-			finalIDs = append(finalIDs, autoTaggedTagID)
+	skipped := 0
+	effectivePolicy := "none"
+
+	if writeTags {
+		excluded, err := a.buildExclusionSet()
+		if err != nil {
+			return nil, 0, "", fmt.Errorf("build exclusion set: %w", err)
 		}
-	default: // merge
-		// Filter the scene's pre-existing tags through the exclusion set
-		// too. Otherwise an excluded tag that was already on the scene —
-		// from a prior plugin run, a manual add, or an earlier version
-		// with different exclusion settings — would ride through the
-		// merge untouched. The exclusion lists are meant to express "this
-		// tag should never appear on the scene", not just "don't add this
-		// tag from the classifier this one time".
-		existing := make([]string, 0, len(scene.Tags))
-		existingRemoved := 0
-		for _, t := range scene.Tags {
-			id := string(t.ID)
-			if excluded[id] {
-				existingRemoved++
+
+		keptIDs := make([]string, 0, len(tags))
+		seen := map[string]bool{}
+		for _, t := range tags {
+			if t.TagID == "" {
 				continue
 			}
-			existing = append(existing, id)
+			if excluded[t.TagID] {
+				skipped++
+				continue
+			}
+			if seen[t.TagID] {
+				continue
+			}
+			seen[t.TagID] = true
+			keptIDs = append(keptIDs, t.TagID)
 		}
-		if existingRemoved > 0 {
-			log.Infof("Exclusion: removed %d pre-existing tag(s) from scene %s that matched the exclusion set",
-				existingRemoved, string(scene.ID))
+
+		policy := "merge"
+		if getBoolSetting(a.config, "replaceExistingTags", false) {
+			policy = "replace"
 		}
-		finalIDs = mergeTagIDs(existing, keptIDs)
-		if autoTaggedTagID != "" && !containsString(finalIDs, autoTaggedTagID) {
-			finalIDs = append(finalIDs, autoTaggedTagID)
+
+		effectivePolicy = policy
+		if policy == "replace" && len(keptIDs) == 0 {
+			log.Warnf("Replace policy with empty post-exclusion tag list — falling back to merge for scene %s", string(scene.ID))
+			effectivePolicy = "merge"
+		}
+
+		switch effectivePolicy {
+		case "replace":
+			finalIDs = append(finalIDs, keptIDs...)
+		default: // merge
+			existing := make([]string, 0, len(scene.Tags))
+			for _, t := range scene.Tags {
+				existing = append(existing, string(t.ID))
+			}
+			finalIDs = mergeTagIDs(existing, keptIDs)
+		}
+	} else {
+		// Not a tags run — pass existing scene tags through unchanged.
+		finalIDs = make([]string, 0, len(scene.Tags))
+		for _, t := range scene.Tags {
+			finalIDs = append(finalIDs, string(t.ID))
 		}
 	}
 
-	// Optionally stage a details write. Only applies when:
-	//   1. The mergeSummaryWhenMissing setting is ON, AND
-	//   2. The scene's existing details field is empty (we never overwrite
-	//      a scene the user has already described), AND
-	//   3. The classifier returned a non-empty scene_summary.
-	// When any condition fails, detailsToWrite stays nil and Stash's
-	// sceneUpdate mutation leaves the details field untouched.
-	//
-	// The classifier's LLM-generated summary separates paragraphs with
-	// double newlines (\n\n), which Stash renders as an extra blank line
-	// between paragraphs in the details field. Collapse runs of 2+
-	// newlines to a single newline so the stored text reflows cleanly.
-	// The loop handles \n\n\n and longer runs too, not just exact pairs.
+	// -- Housekeeping tags (applied regardless of which operations ran) ------
+	// autoTaggedTagId: add if configured and not already present.
+	if autoTaggedTagID != "" && !containsString(finalIDs, autoTaggedTagID) {
+		finalIDs = append(finalIDs, autoTaggedTagID)
+	}
+	// batchTagId: remove if configured and present — the scene has been
+	// processed and should no longer appear in the batch input pool.
+	if batchTagID != "" {
+		finalIDs = removeString(finalIDs, batchTagID)
+	}
+
+	// -- Summary ------------------------------------------------------------
 	var detailsToWrite *string
-	if getBoolSetting(a.config, "mergeSummaryWhenMissing", false) &&
+	if writeSummary &&
+		getBoolSetting(a.config, "mergeSummaryWhenMissing", false) &&
 		strings.TrimSpace(scene.Details) == "" &&
 		strings.TrimSpace(summary) != "" {
 		s := summary
@@ -1038,14 +1043,10 @@ func (a *autoVisionPlugin) applyTagsToScene(scene *sceneInfo, tags []ClassifierT
 			string(scene.ID), len(s))
 	}
 
-	// Symmetric optional title write. Only applies when:
-	//   1. The mergeTitleWhenMissing setting is ON, AND
-	//   2. The scene's existing title field is empty, AND
-	//   3. The classifier returned a non-empty suggested_title.
-	// Non-empty titles are never overwritten — the plugin can only fill in
-	// missing titles, never replace user-assigned ones.
+	// -- Title --------------------------------------------------------------
 	var titleToWrite *string
-	if getBoolSetting(a.config, "mergeTitleWhenMissing", false) &&
+	if writeTitle &&
+		getBoolSetting(a.config, "mergeTitleWhenMissing", false) &&
 		strings.TrimSpace(scene.Title) == "" &&
 		strings.TrimSpace(title) != "" {
 		t := title
@@ -1463,6 +1464,17 @@ func parseOperations(csv string) []string {
 	return ops
 }
 
+// opsInclude reports whether the given operation is active. A nil ops slice
+// means "all operations" (the service runs everything), so every operation
+// is considered active. A non-nil slice means only the listed operations
+// were requested.
+func opsInclude(ops []string, name string) bool {
+	if ops == nil {
+		return true
+	}
+	return containsString(ops, "all") || containsString(ops, name)
+}
+
 func getStringSetting(cfg PluginConfig, key, def string) string {
 	if v, ok := cfg[key]; ok {
 		if s, ok := v.(string); ok && s != "" {
@@ -1592,6 +1604,16 @@ func containsString(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func removeString(haystack []string, needle string) []string {
+	out := make([]string, 0, len(haystack))
+	for _, s := range haystack {
+		if s != needle {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func sceneHasTag(tags []sceneTag, tagID string) bool {
