@@ -439,3 +439,9 @@ The legacy `autovision.py` and `autovision.yml` files were removed from the plug
 - `details` is forwarded from Stash when non-empty, otherwise omitted.
 - Build target is linux/amd64 only.
 - **Sprite URLs do not need authentication from the plugin side.** The auto-vision service manages its own access to the Stash API, so `sprite_vtt_url` / `sprite_image_url` can be forwarded as the plain paths returned by `findScene`'s `paths.vtt` / `paths.sprite` fields. No API key appending, no session cookie forwarding.
+
+---
+
+## 7. Known issues
+
+- **Possible bug in rollup API fallback path.** There may be a bug in the fallback processing when the rollup API host is used as the fallback target. Needs investigation.
